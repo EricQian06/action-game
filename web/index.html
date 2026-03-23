@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>动作闯关游戏 - Action Game</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Noto+Sans+SC:wght@300;400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="app">
+        <!-- 加载画面 -->
+        <div id="loading-screen" class="screen active">
+            <div class="loading-content">
+                <div class="logo">
+                    <h1>ACTION GAME</h1>
+                    <span class="subtitle">动作闯关</span>
+                </div>
+                <div class="loading-bar">
+                    <div class="progress"></div>
+                </div>
+                <p class="loading-text">正在加载资源...</p>
+            </div>
+        </div>
+
+        <!-- 登录/注册页面 -->
+        <div id="auth-screen" class="screen">
+            <div class="auth-container">
+                <div class="auth-box">
+                    <h2>开始挑战</h2>
+                    <div class="auth-tabs">
+                        <button class="tab-btn active" data-tab="login">登录</button>
+                        <button class="tab-btn" data-tab="register">注册</button>
+                    </div>
+
+                    <!-- 登录表单 -->
+                    <form id="login-form" class="auth-form active">
+                        <div class="form-group">
+                            <label for="login-username">用户名</label>
+                            <input type="text" id="login-username" required placeholder="请输入用户名">
+                        </div>
+                        <div class="form-group">
+                            <label for="login-password">密码</label>
+                            <input type="password" id="login-password" required placeholder="请输入密码">
+                        </div>
+                        <button type="submit" class="btn btn-primary">登录</button>
+                    </form>
+
+                    <!-- 注册表单 -->
+                    <form id="register-form" class="auth-form">
+                        <div class="form-group">
+                            <label for="reg-username">用户名</label>
+                            <input type="text" id="reg-username" required placeholder="请输入用户名">
+                        </div>
+                        <div class="form-group">
+                            <label for="reg-password">密码</label>
+                            <input type="password" id="reg-password" required placeholder="请输入密码（至少6位）">
+                        </div>
+                        <div class="form-group">
+                            <label for="reg-password-confirm">确认密码</label>
+                            <input type="password" id="reg-password-confirm" required placeholder="请再次输入密码">
+                        </div>
+                        <button type="submit" class="btn btn-primary">注册</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- 主菜单页面 -->
+        <div id="main-menu-screen" class="screen">
+            <div class="menu-container">
+                <header class="menu-header">
+                    <div class="user-info">
+                        <div class="avatar">
+                            <img src="assets/default-avatar.png" alt="Avatar" id="user-avatar">
+                        </div>
+                        <div class="user-details">
+                            <h3 id="user-name">玩家</h3>
+                            <div class="user-stats">
+                                <span class="stat">
+                                    <i class="icon-level"></i>
+                                    等级 <strong id="user-level">1</strong>
+                                </span>
+                                <span class="stat">
+                                    <i class="icon-score"></i>
+                                    总分 <strong id="user-score">0</strong>
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="system-status">
+                        <div class="status-item" id="status-stm32">
+                            <span class="indicator"></span>
+                            <span class="label">开发板</span>
+                        </div>
+                        <div class="status-item" id="status-camera">
+                            <span class="indicator"></span>
+                            <span class="label">摄像头</span>
+                        </div>
+                    </div>
+                </header>
+
+                <main class="menu-content">
+                    <h2 class="section-title">选择关卡</h2>
+                    <div class="levels-grid" id="levels-container">
+                        <!-- 动态生成关卡卡片 -->
+                    </div>
+                </main>
+            </div>
+        </div>
+
+        <!-- 游戏页面 -->
+        <div id="game-screen" class="screen">
+            <div class="game-container">
+                <!-- 游戏HUD -->
+                <header class="game-hud">
+                    <div class="hud-left">
+                        <button id="btn-pause" class="btn-icon">
+                            <i class="icon-pause"></i>
+                        </button>
+                        <div class="level-info">
+                            <span class="label">关卡</span>
+                            <span class="value" id="game-level-name">--</span>
+                        </div>
+                    </div>
+
+                    <div class="hud-center">
+                        <div class="action-progress">
+                            <span class="current" id="current-action-num">1</span>
+                            <span class="separator">/</span>
+                            <span class="total" id="total-action-num">5</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="fill" id="action-progress-fill"></div>
+                        </div>
+                    </div>
+
+                    <div class="hud-right">
+                        <div class="score-display">
+                            <span class="label">得分</span>
+                            <span class="value" id="game-score">0</span>
+                        </div>
+                        <div class="timer" id="game-timer">
+                            <i class="icon-timer"></i>
+                            <span>00:00</span>
+                        </div>
+                    </div>
+                </header>
+
+                <!-- 游戏主区域 -->
+                <main class="game-main">
+                    <!-- 目标动作展示 -->
+                    <div class="target-pose-panel">
+                        <h3>目标动作</h3>
+                        <div class="target-pose-display" id="target-pose-display">
+                            <img src="assets/poses/pose-placeholder.svg" alt="Target Pose" id="target-pose-img">
+                            <div class="pose-name" id="target-pose-name">准备动作</div>
+                        </div>
+                    </div>
+
+                    <!-- 倒计时显示 -->
+                    <div class="countdown-overlay" id="countdown-overlay">
+                        <div class="countdown-number" id="countdown-number">3</div>
+                    </div>
+
+                    <!-- 动作结果 -->
+                    <div class="action-result-overlay" id="action-result-overlay">
+                        <div class="result-content">
+                            <div class="result-icon" id="result-icon"></div>
+                            <div class="result-score" id="result-score">0</div>
+                            <div class="result-feedback" id="result-feedback"></div>
+                        </div>
+                    </div>
+
+                    <!-- 摄像头预览 -->
+                    <div class="camera-preview-panel" id="camera-preview-panel">
+                        <h3>摄像头预览</h3>
+                        <div class="preview-container">
+                            <img src="" alt="Camera Preview" id="camera-preview-img">
+                            <div class="preview-placeholder">
+                                <i class="icon-camera"></i>
+                                <span>等待拍照...</span>
+                            </div>
+                        </div>
+                    </div>
+                </main>
+
+                <!-- 游戏控制栏 -->
+                <footer class="game-controls">
+                    <button id="btn-start-action" class="btn btn-large btn-primary">
+                        <i class="icon-play"></i>
+                        <span>准备就绪</span>
+                    </button>
+                </footer>
+            </div>
+        </div>
+
+        <!-- 游戏结果页面 -->
+        <div id="result-screen" class="screen">
+            <div class="result-container">
+                <div class="result-card">
+                    <div class="result-header">
+                        <h2 id="result-title">关卡完成!</h2>
+                        <div class="result-stars" id="result-stars">
+                            <span class="star"></span>
+                            <span class="star"></span>
+                            <span class="star"></span>
+                        </div>
+                    </div>
+
+                    <div class="result-stats">
+                        <div class="stat-item">
+                            <span class="label">最终得分</span>
+                            <span class="value" id="final-score">0</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="label">完成动作</span>
+                            <span class="value" id="actions-completed">0/0</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="label">准确率</span>
+                            <span class="value" id="accuracy">0%</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="label">用时</span>
+                            <span class="value" id="time-used">00:00</span>
+                        </div>
+                    </div>
+
+                    <div class="result-actions">
+                        <button id="btn-retry" class="btn btn-secondary">
+                            <i class="icon-retry"></i>
+                            重试
+                        </button>
+                        <button id="btn-next-level" class="btn btn-primary">
+                            下一关
+                            <i class="icon-arrow-right"></i>
+                        </button>
+                        <button id="btn-back-menu" class="btn btn-text">
+                            返回主菜单
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 脚本引用 -->
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
