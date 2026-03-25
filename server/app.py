@@ -540,19 +540,6 @@ def capture_and_process(session_id, room, action_index):
         }, room=room)
 
 # ==================== REST API路由 ====================
-
-@app.route('/api/v1/system/status', methods=['GET'])
-def system_status():
-    """获取系统状态"""
-    return jsonify({
-        'success': True,
-        'data': {
-            'stm32_connected': serial_manager.is_connected() if serial_manager else False,
-            'camera_ready': serial_manager.camera_ready if serial_manager else False,
-            'mediapipe_ready': pose_detector.is_ready() if pose_detector else False,
-            'active_sessions': len(active_sessions),
-            'server_time': datetime.utcnow().isoformat()
-        }
     })
 
 @app.route('/api/v1/auth/register', methods=['POST'])

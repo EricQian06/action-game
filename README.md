@@ -56,26 +56,15 @@
 ### 1. 克隆项目
 
 ```bash
-git clone https://github.com/your-team/action-game.git
+git clone https://github.com/EricQian06/action-game.git
 cd action-game
 ```
 
 ### 2. 安装依赖
 
-#### Python服务器依赖
-
 ```bash
 cd server
 pip install -r requirements.txt
-```
-
-#### 前端依赖
-
-前端使用原生技术，无需额外安装。如需开发工具:
-
-```bash
-# 安装Live Server用于开发
-npm install -g live-server
 ```
 
 ### 3. 初始化数据库
@@ -241,9 +230,8 @@ A: 检查以下几点:
 
 如有问题或建议，请联系项目团队:
 
-- **项目主页**: https://github.com/your-team/action-game
-- **问题反馈**: https://github.com/your-team/action-game/issues
-- **邮箱**: action-game@example.com
+- **项目主页**: https://github.com/EricQian06/action-game
+- **问题反馈**: https://github.com/EricQian06/action-game/issues
 
 ## 许可证
 
