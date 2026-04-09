@@ -540,7 +540,7 @@ def capture_and_process(session_id, room, action_index):
         }, room=room)
 
 # ==================== REST API路由 ====================
-    })
+    
 
 @app.route('/api/v1/auth/register', methods=['POST'])
 def register():
