@@ -60,6 +60,12 @@ git push -u origin master
 
 ### 2. 如何运行此项目
 
+在 `server/detect` 中的 `test.mp4` 是一段深蹲视频，运行以下命令完成深蹲计数：
+
+```bash
+python squat_detector.py --mode video --video_path ./test.mp4 --output ./output.mp4
+```
+
 安装 python 依赖
 
 ```bash
