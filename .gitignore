@@ -53,6 +53,10 @@ yarn-error.log*
 *.sqlite
 *.sqlite3
 
+# Claude Code
+.claude/
+settings.local.json
+
 # Uploads
 uploads/
 temp/

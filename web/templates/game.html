@@ -28,6 +28,62 @@
         
         .status { text-align: center; margin: 15px 0; font-weight: 500; min-height: 24px; color: #555; }
         .hidden { display: none !important; }
+
+        /* 评分显示样式 */
+        .score-panel {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 12px;
+            margin: 20px auto;
+            max-width: 400px;
+            text-align: center;
+            display: none;
+        }
+        .score-panel.show { display: block; animation: fadeIn 0.5s ease; }
+        .score-value {
+            font-size: 48px;
+            font-weight: bold;
+            margin: 10px 0;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        .score-label {
+            font-size: 18px;
+            opacity: 0.9;
+        }
+        .score-bar {
+            width: 100%;
+            height: 20px;
+            background: rgba(255,255,255,0.3);
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 15px 0;
+        }
+        .score-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #f093fb 0%, #f5576c 100%);
+            border-radius: 10px;
+            transition: width 1s ease;
+        }
+        .match-high { color: #27ae60; }
+        .match-medium { color: #f39c12; }
+        .match-low { color: #e74c3c; }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* 动作标签 */
+        .action-tag {
+            display: inline-block;
+            padding: 5px 15px;
+            background: #3498db;
+            color: white;
+            border-radius: 20px;
+            font-size: 14px;
+            margin: 5px;
+        }
     </style>
 </head>
 <body>
@@ -47,6 +103,17 @@
             </div>
         </div>
         
+        <!-- 评分显示面板 -->
+        <div id="scorePanel" class="score-panel">
+            <div class="score-label">动作匹配度</div>
+            <div class="score-value" id="scoreValue">0%</div>
+            <div class="score-bar">
+                <div class="score-bar-fill" id="scoreBarFill" style="width: 0%"></div>
+            </div>
+            <div id="scoreMessage">正在评分...</div>
+            <div id="targetActionDisplay" style="margin-top: 10px; font-size: 14px; opacity: 0.9;"></div>
+        </div>
+
         <div class="controls">
             <button id="startBtn">开始游戏</button>
             <button id="captureBtn">✅ 确定/拍照提交</button>
@@ -62,8 +129,16 @@
         const nextBtn = document.getElementById('nextBtn');
         const statusText = document.getElementById('statusText');
         const imageHint = document.getElementById('imageHint');
-        
+
+        // 评分相关元素
+        const scorePanel = document.getElementById('scorePanel');
+        const scoreValue = document.getElementById('scoreValue');
+        const scoreBarFill = document.getElementById('scoreBarFill');
+        const scoreMessage = document.getElementById('scoreMessage');
+        const targetActionDisplay = document.getElementById('targetActionDisplay');
+
         let stream = null;
+        let currentTargetAction = 'squat'; // 当前目标动作
 
         // 1. 启动摄像头 & 获取首个任务
         startBtn.addEventListener('click', async () => {
@@ -98,6 +173,13 @@
                     statusText.textContent = "👉 请模仿屏幕中的动作，完成后点击确定提交";
                     captureBtn.style.display = 'inline-block';
                     captureBtn.disabled = false;
+
+                    // 保存当前目标动作
+                    currentTargetAction = data.target_action || 'squat';
+                    console.log('目标动作:', currentTargetAction);
+
+                    // 隐藏评分面板
+                    scorePanel.classList.remove('show');
                 } else {
                     statusText.textContent = "⚠️ " + (data.message || "所有动作已轮询完毕，请刷新页面重新开始");
                     captureBtn.style.display = 'none';
@@ -131,9 +213,9 @@
                     const result = await res.json();
                     
                     if (result.status === 'success') {
-                        statusText.textContent = "✅ 提交成功！照片已保存至服务器";
-                        captureBtn.style.display = 'none';
-                        nextBtn.style.display = 'inline-block';
+                        statusText.textContent = "✅ 照片已保存，正在评分...";
+                        // 调用评分接口
+                        scoreGamerPhoto(result.filename, currentTargetAction);
                     } else {
                         statusText.textContent = "❌ 上传失败: " + result.message;
                         captureBtn.disabled = false;
@@ -147,8 +229,93 @@
 
         // 4. 切换到下一个动作
         nextBtn.addEventListener('click', () => {
+            // 隐藏评分面板
+            scorePanel.classList.remove('show');
             loadNextAction();
         });
+
+        // 评分功能：调用后端评分接口
+        async function scoreGamerPhoto(filename, targetAction) {
+            try {
+                statusText.textContent = "🔄 正在进行动作评分...";
+
+                const res = await fetch('/api/score_photo', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        filename: filename,
+                        target_action: targetAction
+                    })
+                });
+
+                const result = await res.json();
+
+                if (result.status === 'success') {
+                    // 显示评分面板
+                    displayScore(result);
+
+                    statusText.textContent = `✅ 评分完成！相似度: ${(result.score * 100).toFixed(1)}%`;
+                    captureBtn.style.display = 'none';
+                    nextBtn.style.display = 'inline-block';
+                } else {
+                    statusText.textContent = "❌ 评分失败: " + result.message;
+                    captureBtn.style.display = 'none';
+                    nextBtn.style.display = 'inline-block';
+                }
+            } catch (err) {
+                console.error('评分请求失败:', err);
+                statusText.textContent = "❌ 评分请求失败: " + err.message;
+                captureBtn.style.display = 'none';
+                nextBtn.style.display = 'inline-block';
+            }
+        }
+
+        // 显示评分结果
+        function displayScore(result) {
+            const score = result.score;
+            const percentage = Math.round(score * 100);
+            const matchLevel = result.match_level;
+            const matchText = result.match_text;
+
+            // 更新分数显示
+            scoreValue.textContent = percentage + '%';
+            scoreBarFill.style.width = percentage + '%';
+
+            // 根据匹配等级设置颜色
+            scorePanel.className = 'score-panel show';
+            if (matchLevel === 'high') {
+                scorePanel.style.background = 'linear-gradient(135deg, #11998e 0%, #38ef7d 100%)';
+                scoreMessage.innerHTML = `<span style="font-size: 24px;">🎉</span> ${matchText}！动作非常标准！`;
+            } else if (matchLevel === 'medium') {
+                scorePanel.style.background = 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)';
+                scoreMessage.innerHTML = `<span style="font-size: 24px;">👍</span> ${matchText}，动作基本完成`;
+            } else {
+                scorePanel.style.background = 'linear-gradient(135deg, #ff9966 0%, #ff5e62 100%)';
+                scoreMessage.innerHTML = `<span style="font-size: 24px;">💪</span> ${matchText}，再试一次会更好`;
+            }
+
+            // 显示目标动作
+            const actionNames = {
+                'squat': '深蹲',
+                'standing': '站立',
+                'hands_up': '举手',
+                'stride': '跨步',
+                'jump': '跳跃',
+                'sit': '坐下'
+            };
+            const actionName = actionNames[result.target_action] || result.target_action;
+            targetActionDisplay.innerHTML = `目标动作: <span class="action-tag">${actionName}</span>`;
+        }
+    </script>
+</body>
+</html>
+                'standing': '站立',
+                'hands_up': '举手',
+                'stride': '跨步'
+            };
+            const actionName = actionNames[result.target_action] || result.target_action;
+            targetActionDisplay.innerHTML = `目标动作: <span class="action-tag">${actionName}</span>`;
+        }
 
         // 页面关闭时释放摄像头
         window.addEventListener('beforeunload', () => {

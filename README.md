@@ -64,7 +64,7 @@ git push -u origin master
 
 ### 2. 如何运行此项目
 
-在 `server/detect` 中的 `test.mp4` 是一段深蹲视频，运行以下命令完成深蹲计数：
+在 `server` 中的 `test.mp4` 是一段深蹲视频，运行以下命令完成深蹲计数：
 
 ```bash
 python squat_detector.py --mode video --video_path ./test.mp4 --output ./output.mp4
@@ -76,37 +76,15 @@ python squat_detector.py --mode video --video_path ./test.mp4 --output ./output.
 python3 squat_detector.py --mode realtime --camera 0
 ```
 
-安装 python 依赖
+在 `web` 中运行 `app.py`，在浏览器中打开 `https://localhost:5000` 即可访问游戏界面。
+
+在 `server` 中的 `/training_data` 中存放不同动作的训练图片，每个动作环顾一周拍摄人体（尽可能减少四肢的遮挡），并运行
 
 ```bash
-cd server
-pip install -r requirements.txt
+python3 action_matcher.py --prepare --input_dir ./training_data --output_dir ./pose_samples
 ```
 
-初始化数据库
-
-```bash
-cd tools
-python setup_db.py
-```
-
-启动服务器
-
-```bash
-cd server
-python app.py
-```
-
-服务器将在 `http://localhost:5000` 启动
-
-启动前端
-
-直接使用浏览器打开 `web/index.html` 或使用Live Server:
-
-```bash
-cd web
-live-server --port=3000
-```
+可以生成训练后的模型，存储在 `/pose_samples` 中
 
 连接硬件
 

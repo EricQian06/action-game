@@ -1,11 +1,9 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify,send_from_directory
 import sqlite3
 import os
-from keyb_sim import start_keyboard_simulation  # 导入键盘模拟功能
+import sys
 import uuid
-import os
 import random
-import uuid
 from werkzeug.utils import secure_filename
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -13,6 +11,28 @@ SAMPLE_DIR = os.path.join(BASE_DIR, 'sample_photos')
 GAMER_DIR = os.path.join(BASE_DIR, 'gamer_photos')
 os.makedirs(SAMPLE_DIR, exist_ok=True)
 os.makedirs(GAMER_DIR, exist_ok=True)
+
+# 添加server目录到Python路径以导入动作识别模块
+PROJECT_DIR = os.path.dirname(BASE_DIR)
+SERVER_DIR = os.path.join(PROJECT_DIR, 'server')
+sys.path.insert(0, SERVER_DIR)
+
+# 导入键盘模拟功能和动作识别API
+try:
+    from keyb_sim import start_keyboard_simulation
+except ImportError:
+    start_keyboard_simulation = lambda: None
+    print("[Warning] keyb_sim module not found")
+
+# 导入动作识别API
+try:
+    from action_api import ActionRecognitionAPI
+    # 初始化动作识别API（全局单例）
+    action_api = ActionRecognitionAPI(pose_samples_folder=os.path.join(SERVER_DIR, 'pose_samples'))
+    print(f"[Info] 动作识别API初始化成功，可用动作: {action_api.get_available_actions()}")
+except Exception as e:
+    print(f"[Warning] 动作识别API初始化失败: {e}")
+    action_api = None
 
 app = Flask(__name__)
 app.secret_key = 'your_secret_key_here'  # 用于会话管理和闪存消息，生产环境请更换为复杂随机字符串
@@ -123,11 +143,30 @@ def get_action_image():
 
     chosen = random.choice(available)
     session['used_images'].append(chosen)
-    
+
+    # 从文件名推断目标动作类型
+    # 例如: squat_01.jpg -> squat, hands_up_02.png -> hands_up
+    target_action = 'squat'  # 默认动作
+    filename_lower = chosen.lower()
+
+    if 'squat' in filename_lower:
+        target_action = 'squat'
+    elif 'hands_up' in filename_lower or 'handsup' in filename_lower or 'hand' in filename_lower:
+        target_action = 'hands_up'
+    elif 'stride' in filename_lower or 'step' in filename_lower:
+        target_action = 'stride'
+    elif 'stand' in filename_lower:
+        target_action = 'standing'
+
+    # 保存当前目标动作到session
+    session['current_action'] = target_action
+
     # 返回图片访问路径
     return jsonify({
         'status': 'success',
-        'image_url': f'/api/sample_images/{chosen}'
+        'image_url': f'/api/sample_images/{chosen}',
+        'target_action': target_action,
+        'filename': chosen
     })
 
 #serve_sample_image
@@ -153,12 +192,127 @@ def save_gamer_photo():
     save_path = os.path.join(GAMER_DIR, new_filename)
     
     file.save(save_path)
-    
+
+    # 从session中获取当前目标动作类型（如果有）
+    target_action = session.get('current_action', 'squat')
+
     return jsonify({
-        'status': 'success', 
-        'message': '照片已保存', 
-        'filename': new_filename
+        'status': 'success',
+        'message': '照片已保存',
+        'filename': new_filename,
+        'target_action': target_action
     })
+
+#score_gamer_photo
+@app.route('/api/score_photo', methods=['POST'])
+def score_photo():
+    """
+    对玩家照片进行动作评分
+
+    请求体: { filename: "用户名_UUID.jpg", target_action: "squat" }
+    响应: { status: "success", score: 0.85, match_level: "high", ... }
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({'status': 'error', 'message': '请求体不能为空'}), 400
+
+    filename = data.get('filename')
+    target_action = data.get('target_action', 'squat')
+
+    if not filename:
+        return jsonify({'status': 'error', 'message': '缺少filename参数'}), 400
+
+    # 检查文件是否存在
+    photo_path = os.path.join(GAMER_DIR, filename)
+    if not os.path.exists(photo_path):
+        return jsonify({'status': 'error', 'message': f'照片不存在: {filename}'}), 404
+
+    # 检查动作识别API是否可用
+    if action_api is None:
+        return jsonify({
+            'status': 'error',
+            'message': '动作识别API未初始化，请检查server/pose_samples目录是否存在训练数据'
+        }), 500
+
+    # 检查目标动作是否有效
+    available_actions = action_api.get_available_actions()
+    if target_action not in available_actions:
+        return jsonify({
+            'status': 'error',
+            'message': f'未知的动作类型: {target_action}',
+            'available_actions': available_actions
+        }), 400
+
+    # 执行动作识别
+    try:
+        result = action_api.recognize(photo_path, target_action)
+
+        if not result['success']:
+            return jsonify({
+                'status': 'error',
+                'message': result.get('error', '识别失败'),
+                'landmarks_detected': result.get('landmarks_detected', False)
+            }), 500
+
+        score = result['score']
+
+        # 根据分数判断匹配等级
+        if score >= 0.7:
+            match_level = 'high'
+            match_text = '高度匹配'
+        elif score >= 0.4:
+            match_level = 'medium'
+            match_text = '基本匹配'
+        else:
+            match_level = 'low'
+            match_text = '匹配度低'
+
+        return jsonify({
+            'status': 'success',
+            'score': round(score, 4),
+            'match_level': match_level,
+            'match_text': match_text,
+            'target_action': target_action,
+            'filename': filename,
+            'landmarks_detected': result.get('landmarks_detected', False)
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'status': 'error',
+            'message': f'评分过程出错: {str(e)}'
+        }), 500
+
+
+#get_available_actions
+@app.route('/api/available_actions', methods=['GET'])
+def get_available_actions():
+    """获取所有可用的动作类型"""
+    if action_api is None:
+        return jsonify({
+            'status': 'error',
+            'message': '动作识别API未初始化'
+        }), 500
+
+    actions = action_api.get_available_actions()
+    # 动作名称映射
+    action_names = {
+        'squat': '深蹲',
+        'standing': '站立',
+        'hands_up': '举手',
+        'stride': '跨步',
+        'jump': '跳跃',
+        'sit': '坐下'
+    }
+
+    return jsonify({
+        'status': 'success',
+        'actions': actions,
+        'action_names': {k: action_names.get(k, k) for k in actions}
+    })
+
 
 #logout
 @app.route('/logout')
