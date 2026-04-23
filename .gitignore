@@ -1,3 +1,5 @@
+#virtual environment lib
+server/.web_coding/
 # Python
 __pycache__/
 *.py[cod]

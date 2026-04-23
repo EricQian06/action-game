@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>动作模仿挑战</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: 'Segoe UI', sans-serif; background: #f4f7f6; margin: 0; padding: 20px; color: #333; }
+        .container { max-width: 960px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 12px; box-shadow: 0 6px 16px rgba(0,0,0,0.1); }
+        h1 { text-align: center; color: #2c3e50; margin-bottom: 10px; }
+        .subtitle { text-align: center; color: #7f8c8d; margin-bottom: 20px; }
+        
+        .game-area { display: flex; flex-wrap: wrap; justify-content: center; gap: 20px; margin: 20px 0; }
+        .panel { flex: 1; min-width: 320px; text-align: center; }
+        .panel h3 { margin-top: 0; color: #34495e; }
+        
+        video, img { width: 100%; max-width: 480px; border-radius: 8px; background: #000; object-fit: cover; }
+        img { border: 3px solid #3498db; min-height: 300px; background: #ecf0f1; }
+        
+        .controls { text-align: center; margin-top: 20px; }
+        button { padding: 12px 24px; font-size: 16px; cursor: pointer; border: none; border-radius: 6px; margin: 5px; transition: 0.2s; }
+        button:disabled { opacity: 0.6; cursor: not-allowed; }
+        #startBtn { background: #27ae60; color: white; }
+        #captureBtn { background: #2980b9; color: white; display: none; }
+        #nextBtn { background: #e67e22; color: white; display: none; }
+        button:hover:not(:disabled) { filter: brightness(1.1); transform: translateY(-1px); }
+        
+        .status { text-align: center; margin: 15px 0; font-weight: 500; min-height: 24px; color: #555; }
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎮 动作模仿挑战</h1>
+        <p class="subtitle" id="statusText">点击“开始游戏”启动摄像头并获取任务</p>
+        
+        <div class="game-area">
+            <div class="panel">
+                <h3>📷 实时画面</h3>
+                <video id="webcam" autoplay playsinline muted></video>
+            </div>
+            <div class="panel">
+                <h3>🎯 目标动作</h3>
+                <img id="targetImage" src="" alt="等待加载..." style="display:none;">
+                <p id="imageHint" style="color:#888; margin-top:10px;">请先开始游戏</p>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <button id="startBtn">开始游戏</button>
+            <button id="captureBtn">✅ 确定/拍照提交</button>
+            <button id="nextBtn">🔄 下一个动作</button>
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('webcam');
+        const targetImage = document.getElementById('targetImage');
+        const startBtn = document.getElementById('startBtn');
+        const captureBtn = document.getElementById('captureBtn');
+        const nextBtn = document.getElementById('nextBtn');
+        const statusText = document.getElementById('statusText');
+        const imageHint = document.getElementById('imageHint');
+        
+        let stream = null;
+
+        // 1. 启动摄像头 & 获取首个任务
+        startBtn.addEventListener('click', async () => {
+            try {
+                statusText.textContent = "正在申请摄像头权限...";
+                stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 }, audio: false });
+                video.srcObject = stream;
+                statusText.textContent = "摄像头已就绪，正在分配动作任务...";
+                startBtn.disabled = true;
+                await loadNextAction();
+            } catch (err) {
+                statusText.textContent = "❌ 摄像头启动失败: " + err.message;
+                console.error(err);
+            }
+        });
+
+        // 2. 请求后端获取随机不重复图片
+        async function loadNextAction() {
+            try {
+                captureBtn.style.display = 'none';
+                nextBtn.style.display = 'none';
+                imageHint.style.display = 'block';
+                imageHint.textContent = "加载中...";
+                
+                const res = await fetch('/api/get_action_image');
+                const data = await res.json();
+                
+                if (data.status === 'success') {
+                    targetImage.src = data.image_url;
+                    targetImage.style.display = 'inline-block';
+                    imageHint.style.display = 'none';
+                    statusText.textContent = "👉 请模仿屏幕中的动作，完成后点击确定提交";
+                    captureBtn.style.display = 'inline-block';
+                    captureBtn.disabled = false;
+                } else {
+                    statusText.textContent = "⚠️ " + (data.message || "所有动作已轮询完毕，请刷新页面重新开始");
+                    captureBtn.style.display = 'none';
+                }
+            } catch (err) {
+                statusText.textContent = "❌ 网络请求失败: " + err.message;
+            }
+        }
+
+        // 3. 拍照并上传
+        captureBtn.addEventListener('click', async () => {
+            if (!stream || !video.videoWidth) return;
+            
+            captureBtn.disabled = true;
+            statusText.textContent = "📸 正在拍照并上传...";
+            
+            // 创建离屏 Canvas 截取当前帧
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            // 转为 Blob 文件
+            canvas.toBlob(async (blob) => {
+                const formData = new FormData();
+                formData.append('photo', blob, `capture_${Date.now()}.jpg`);
+                
+                try {
+                    const res = await fetch('/api/save_gamer_photo', { method: 'POST', body: formData });
+                    const result = await res.json();
+                    
+                    if (result.status === 'success') {
+                        statusText.textContent = "✅ 提交成功！照片已保存至服务器";
+                        captureBtn.style.display = 'none';
+                        nextBtn.style.display = 'inline-block';
+                    } else {
+                        statusText.textContent = "❌ 上传失败: " + result.message;
+                        captureBtn.disabled = false;
+                    }
+                } catch (err) {
+                    statusText.textContent = "❌ 上传异常: " + err.message;
+                    captureBtn.disabled = false;
+                }
+            }, 'image/jpeg', 0.85);
+        });
+
+        // 4. 切换到下一个动作
+        nextBtn.addEventListener('click', () => {
+            loadNextAction();
+        });
+
+        // 页面关闭时释放摄像头
+        window.addEventListener('beforeunload', () => {
+            if (stream) stream.getTracks().forEach(track => track.stop());
+        });
+    </script>
+</body>
+</html>

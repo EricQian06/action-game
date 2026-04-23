@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>动作捕捉游戏 - 登录</title>
+    <style>
+        body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #f0f2f5; }
+        .login-container { background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); width: 300px; text-align: center; }
+        input { width: 90%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px; }
+        button { width: 100%; padding: 10px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; margin-top: 5px; }
+        button.secondary { background-color: #6c757d; }
+        button:hover { opacity: 0.9; }
+        .error-msg {color: red; font-weight:bold;margin-bottom: 10px;}
+        
+        /* 弹窗样式 */
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; }
+        .modal-content { background: white; padding: 20px; border-radius: 8px; text-align: center; width: 300px; }
+        .modal-buttons { display: flex; gap: 10px; margin-top: 20px; }
+        .btn-register { background-color: #28a745; flex: 1; }
+        .btn-retry { background-color: #007bff; flex: 1; }
+        .close-btn { margin-top: 10px; background: none; border: none; color: #666; cursor: pointer; text-decoration: underline; }
+        
+        /* 单片机控制提示 */
+        .mcu-status { margin-top: 15px; padding: 10px; background: #e7f3ff; border-radius: 4px; font-size: 12px; color: #333; }
+        .mcu-status strong { color: #007bff; }
+    </style>
+</head>
+<body>
+
+<div class="login-container">
+    <h2>游戏登录</h2>
+    <form method="POST" action="/login">
+        <input type="text" name="username" id="username" placeholder="用户名 (必须唯一)" required>
+        <input type="password" name="password" id="password" placeholder="密码" required>
+        
+        <!-- 登录按钮 -->
+        <button type="submit" name="action" value="login">直接登录</button>
+        <!-- 注册按钮 -->
+        <button type="submit" name="action" value="register" class="secondary">新建玩家信息</button>
+    </form>
+    
+    <div class="mcu-status">
+        <strong>单片机控制说明：</strong><br>
+        K1 = 登录 | K2 = 注册<br>
+        用户名和密码通过键盘输入，按下 K1 执行登录，按下 K2 执行注册
+    </div>
+</div>
+
+{% if error %}
+<div id="errorModal" class="modal" style="display: flex;">
+  <div class="modal-content">
+    <h3 style="color: #dc3545; margin-top: 0;">提示</h3>
+    <p>{{ error }}</p>
+    <div class="modal-buttons">
+        <!-- 引导 a: 切换到注册模式 -->
+        <button class="btn-register" onclick="switchToRegister()">去注册</button>
+        <!-- 引导 b: 再试一次 (关闭弹窗) -->
+        <button class="btn-retry" onclick="closeModal()">再试一次</button>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<script>
+    // 关闭弹窗
+    function closeModal() {
+        document.getElementById('errorModal').style.display = 'none';
+        document.querySelector('input[name="password"]').value = '';
+        document.querySelector('input[name="username"]').focus();
+    }
+
+    // 切换到注册模式
+    function switchToRegister() {
+        closeModal();
+        const registerBtn = document.querySelector('button[name="action"][value="register"]');
+        if(registerBtn) {
+            document.querySelector('input[name="username"]').focus();
+            alert("已切换至新建模式，请填写信息后点击'新建玩家信息'按钮。");
+        }
+    }
+    
+    // --- 单片机按键 API 调用 ---
+    // K1 登录：从表单获取用户名和密码并提交
+    window.sendK1 = async function () {
+        const username = document.getElementById('username').value;
+        const password = document.getElementById('password').value;
+        
+        if (!username || !password) {
+            alert('请先输入用户名和密码');
+            return;
+        }
+        
+        try {
+            const formData = new FormData();
+            formData.append('username', username);
+            formData.append('password', password);
+            
+            const response = await fetch('/api/k1_login', { 
+                method: 'POST',
+                body: formData
+            });
+            const data = await response.json();
+            if (data.status === 'success') {
+                alert(data.message);
+                window.location.href = data.redirect;
+            } else {
+                alert(data.message);
+            }
+        } catch (e) {
+            console.error('K1 登录失败:', e);
+            alert('登录请求失败');
+        }
+    }
+    
+    // K2 注册：从表单获取用户名和密码并提交
+    window.sendK2 = async function () {
+        const username = document.getElementById('username').value;
+        const password = document.getElementById('password').value;
+        
+        if (!username || !password) {
+            alert('请先输入用户名和密码');
+            return;
+        }
+        
+        try {
+            const formData = new FormData();
+            formData.append('username', username);
+            formData.append('password', password);
+            
+            const response = await fetch('/api/k2_register', { 
+                method: 'POST',
+                body: formData
+            });
+            const data = await response.json();
+            if (data.status === 'success') {
+                alert(data.message);
+                document.getElementById('username').value = '';
+                document.getElementById('password').value = '';
+            } else {
+                alert(data.message);
+            }
+        } catch (e) {
+            console.error('K2 注册失败:', e);
+            alert('注册请求失败');
+        }
+    }
+    
+    // --- 键盘监听（方便电脑测试，F1=K1, F2=K2）---
+    document.addEventListener('keydown', async (e) => {
+        if (e.key === 'F1') { e.preventDefault(); sendK1(); return; }
+        if (e.key === 'F2') { e.preventDefault(); sendK2(); return; }
+    });
+</script>
+
+</body>
+</html>

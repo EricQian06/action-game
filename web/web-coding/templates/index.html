@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>动作捕捉游戏</title>
+    <style>
+        body { font-family: sans-serif; text-align: center; padding: 50px; }
+        input { padding: 10px; margin: 5px; }
+        button { padding: 10px 20px; background-color: #007bff; color: white; border: none; cursor: pointer; }
+        #result { margin-top: 20px; font-weight: bold; color: green; }
+    </style>
+</head>
+<body>
+    <h1>欢迎进入动作挑战游戏</h1>
+    
+    <!-- 登录区域 -->
+    <div id="login-section">
+        <input type="text" id="username" placeholder="用户名 (试填: admin)">
+        <input type="password" id="password" placeholder="密码 (试填: 123456)">
+        <button onclick="doLogin()">登录</button>
+    </div>
+
+    <!-- 游戏区域 (登录后显示) -->
+    <div id="game-section" style="display:none;">
+        <h2>请做出指定动作...</h2>
+        <p>（此处未来嵌入摄像头画面）</p>
+        <button onclick="submitAction()">提交动作评分</button>
+        <div id="result"></div>
+    </div>
+
+    <script>
+        // 登录逻辑
+        async function doLogin() {
+            const user = document.getElementById('username').value;
+            const pass = document.getElementById('password').value;
+
+            const response = await fetch('/login', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({username: user, password: pass})
+            });
+            
+            const data = await response.json();
+            if (data.status === 'success') {
+                alert(data.message);
+                document.getElementById('login-section').style.display = 'none';
+                document.getElementById('game-section').style.display = 'block';
+            } else {
+                alert(data.message);
+            }
+        }
+
+        // 提交动作逻辑
+        async function submitAction() {
+            document.getElementById('result').innerText = "正在分析...";
+            
+            const response = await fetch('/analyze_action', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({}) // 未来这里放图片数据
+            });
+            
+            const data = await response.json();
+            document.getElementById('result').innerText = "得分：" + data.score + " - " + data.comment;
+        }
+    </script>
+</body>
+</html>
