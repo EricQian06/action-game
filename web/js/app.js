@@ -1,5 +1,5 @@
 /**
- * 动作闯关游戏 - 前端主应用
+ * 深蹲闯关游戏 - 前端主应用
  * 负责页面交互、WebSocket通信和游戏逻辑
  */
 
@@ -9,22 +9,18 @@
 const CONFIG = {
     API_BASE_URL: 'http://localhost:5000/api/v1',
     WS_URL: 'http://localhost:5000',
-    COUNTDOWN_SECONDS: 3,
-    ACTION_TIMEOUT: 10
+    TARGET_SQUAT_COUNT: 5
 };
 
 const AppState = {
     currentScreen: 'loading',
-    user: null,
     socket: null,
-    currentSession: null,
-    currentLevel: null,
-    gameState: 'idle', // idle, countdown, capturing, processing, result
-    countdownInterval: null,
+    localStream: null,  // 本地摄像头流
+    isChallengeActive: false,
+    currentCount: 0,
+    targetCount: 5,
     systemStatus: {
-        stm32Connected: false,
-        cameraReady: false,
-        mediaPipeReady: false
+        detectorReady: false
     }
 };
 
@@ -32,49 +28,6 @@ const AppState = {
 // 工具函数
 // ============================================
 const Utils = {
-    // 格式化时间
-    formatTime(seconds) {
-        const mins = Math.floor(seconds / 60);
-        const secs = seconds % 60;
-        return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-    },
-
-    // 防抖函数
-    debounce(func, wait) {
-        let timeout;
-        return function executedFunction(...args) {
-            const later = () => {
-                clearTimeout(timeout);
-                func(...args);
-            };
-            clearTimeout(timeout);
-            timeout = setTimeout(later, wait);
-        };
-    },
-
-    // 动画数字
-    animateNumber(element, target, duration = 1000) {
-        const start = parseInt(element.textContent) || 0;
-        const startTime = performance.now();
-
-        const update = (currentTime) => {
-            const elapsed = currentTime - startTime;
-            const progress = Math.min(elapsed / duration, 1);
-
-            // 使用缓动函数
-            const easeOutQuart = 1 - Math.pow(1 - progress, 4);
-            const current = Math.floor(start + (target - start) * easeOutQuart);
-
-            element.textContent = current;
-
-            if (progress < 1) {
-                requestAnimationFrame(update);
-            }
-        };
-
-        requestAnimationFrame(update);
-    },
-
     // 显示Toast提示
     showToast(message, type = 'info', duration = 3000) {
         const toast = document.createElement('div');
@@ -85,123 +38,14 @@ const Utils = {
 
         document.body.appendChild(toast);
 
-        // 触发动画
         requestAnimationFrame(() => {
             toast.classList.add('show');
         });
 
-        // 自动移除
         setTimeout(() => {
             toast.classList.remove('show');
             setTimeout(() => toast.remove(), 300);
         }, duration);
-    },
-
-    // 显示/隐藏加载动画
-    showLoading(element, text = '加载中...') {
-        const loader = document.createElement('div');
-        loader.className = 'loading-overlay';
-        loader.innerHTML = `
-            <div class="loading-spinner"></div>
-            <span class="loading-text">${text}</span>
-        `;
-        element.style.position = 'relative';
-        element.appendChild(loader);
-        return loader;
-    },
-
-    hideLoading(element) {
-        const loader = element.querySelector('.loading-overlay');
-        if (loader) loader.remove();
-    }
-};
-
-// ============================================
-// API 通信
-// ============================================
-const API = {
-    // 基础请求函数
-    async request(endpoint, options = {}) {
-        const url = `${CONFIG.API_BASE_URL}${endpoint}`;
-        const config = {
-            headers: {
-                'Content-Type': 'application/json',
-                ...options.headers
-            },
-            ...options
-        };
-
-        if (config.body && typeof config.body === 'object') {
-            config.body = JSON.stringify(config.body);
-        }
-
-        try {
-            const response = await fetch(url, config);
-            const data = await response.json();
-
-            if (!response.ok) {
-                throw new Error(data.error || `HTTP ${response.status}`);
-            }
-
-            return data;
-        } catch (error) {
-            console.error('API请求失败:', error);
-            throw error;
-        }
-    },
-
-    // 用户认证
-    auth: {
-        async register(username, password) {
-            return API.request('/auth/register', {
-                method: 'POST',
-                body: { username, password }
-            });
-        },
-
-        async login(username, password) {
-            const response = await API.request('/auth/login', {
-                method: 'POST',
-                body: { username, password }
-            });
-
-            if (response.success) {
-                AppState.user = response.data;
-                localStorage.setItem('user', JSON.stringify(response.data));
-            }
-
-            return response;
-        },
-
-        logout() {
-            AppState.user = null;
-            localStorage.removeItem('user');
-        }
-    },
-
-    // 游戏数据
-    game: {
-        async getLevels() {
-            return API.request('/game/levels');
-        },
-
-        async getLevel(levelId) {
-            return API.request(`/game/level/${levelId}`);
-        },
-
-        async startGame(userId, levelId) {
-            return API.request('/game/start', {
-                method: 'POST',
-                body: { user_id: userId, level_id: levelId }
-            });
-        }
-    },
-
-    // 系统状态
-    system: {
-        async getStatus() {
-            return API.request('/system/status');
-        }
     }
 };
 
@@ -225,10 +69,6 @@ const SocketManager = {
                     reject(error);
                 });
 
-                AppState.socket.on('disconnect', () => {
-                    console.log('WebSocket已断开');
-                });
-
             } catch (error) {
                 reject(error);
             }
@@ -241,72 +81,62 @@ const SocketManager = {
             console.log('服务器连接确认:', data);
         });
 
-        // 加入游戏确认
-        AppState.socket.on('joined', (data) => {
-            console.log('已加入游戏:', data);
+        // 深蹲挑战开始确认
+        AppState.socket.on('squat_challenge_started', (data) => {
+            console.log('深蹲挑战开始:', data);
+            AppState.targetCount = data.target_count || 5;
+            AppState.isChallengeActive = true;
+            Utils.showToast(data.message, 'success');
         });
 
-        // 倒计时开始
-        AppState.socket.on('countdown_start', (data) => {
-            console.log('倒计时开始:', data);
-            GameUI.startCountdown(data.seconds);
+        // 深蹲更新
+        AppState.socket.on('squat_update', (data) => {
+            AppState.currentCount = data.count;
+            SquatUI.updateDisplay(data);
         });
 
-        // 倒计时滴答
-        AppState.socket.on('countdown_tick', (data) => {
-            GameUI.updateCountdown(data.seconds_remaining);
+        // 深蹲挑战完成
+        AppState.socket.on('squat_completed', (data) => {
+            console.log('深蹲挑战完成:', data);
+            AppState.isChallengeActive = false;
+            AppState.currentCount = data.final_count;
+
+            // 停止摄像头
+            SquatUI.stopCamera();
+
+            // 显示成功页面
+            setTimeout(() => {
+                SquatUI.showSuccessScreen(data.final_count);
+            }, 500);
         });
 
-        // 触发拍照
-        AppState.socket.on('capture_triggered', (data) => {
-            console.log('拍照已触发:', data);
-            GameUI.showCapturingState();
-        });
-
-        // 预览图像
-        AppState.socket.on('preview_image', (data) => {
-            console.log('收到预览图像');
-            GameUI.showPreviewImage(data.image_base64);
-        });
-
-        // 动作结果
-        AppState.socket.on('action_result', (data) => {
-            console.log('动作结果:', data);
-            GameUI.showActionResult(data);
-        });
-
-        // 下一个动作
-        AppState.socket.on('action_assigned', (data) => {
-            console.log('下一个动作:', data);
-            GameUI.setupNextAction(data);
-        });
-
-        // 游戏结束
-        AppState.socket.on('game_ended', (data) => {
-            console.log('游戏结束:', data);
-            GameUI.showGameResult(data);
+        // 深蹲停止确认
+        AppState.socket.on('squat_stopped', (data) => {
+            console.log('深蹲挑战已停止:', data);
+            AppState.isChallengeActive = false;
         });
 
         // 错误
-        AppState.socket.on('error', (data) => {
-            console.error('服务器错误:', data);
+        AppState.socket.on('squat_error', (data) => {
+            console.error('深蹲检测错误:', data);
             Utils.showToast(data.message || '发生错误', 'error');
         });
     },
 
     // 发送事件
-    joinGame(sessionId) {
-        AppState.socket.emit('join_game', { session_id: sessionId });
+    startSquatChallenge(targetCount = 5) {
+        AppState.socket.emit('start_squat_challenge', {
+            target_count: targetCount
+        });
     },
 
-    leaveGame(sessionId) {
-        AppState.socket.emit('leave_game', { session_id: sessionId });
+    stopSquatChallenge() {
+        AppState.socket.emit('stop_squat_challenge', {});
     },
 
-    playerReady(sessionId, actionIndex) {
-        AppState.socket.emit('player_ready', {
-            session_id: sessionId,
-            action_index: actionIndex
+    sendVideoFrame(base64Image) {
+        AppState.socket.emit('video_frame', {
+            image: base64Image
         });
     }
 };
@@ -318,19 +148,16 @@ const ScreenManager = {
     screens: {},
 
     init() {
-        // 收集所有屏幕
         document.querySelectorAll('.screen').forEach(screen => {
             this.screens[screen.id] = screen;
         });
     },
 
     show(screenId) {
-        // 隐藏所有屏幕
         Object.values(this.screens).forEach(screen => {
             screen.classList.remove('active');
         });
 
-        // 显示目标屏幕
         const targetScreen = this.screens[screenId];
         if (targetScreen) {
             targetScreen.classList.add('active');
@@ -344,452 +171,296 @@ const ScreenManager = {
 };
 
 // ============================================
-// 游戏UI控制器
+// 深蹲挑战UI控制器
 // ============================================
-const GameUI = {
-    // 开始倒计时
-    startCountdown(seconds) {
-        AppState.gameState = 'countdown';
-        const overlay = document.getElementById('countdown-overlay');
-        const numberEl = document.getElementById('countdown-number');
+const SquatUI = {
+    videoElement: null,
+    processedFrameElement: null,
+    cameraPlaceholder: null,
+    frameInterval: null,
 
-        overlay.classList.add('active');
+    init() {
+        this.videoElement = document.getElementById('local-video');
+        this.processedFrameElement = document.getElementById('processed-frame');
+        this.cameraPlaceholder = document.getElementById('camera-placeholder');
 
-        let count = seconds;
-        numberEl.textContent = count;
-
-        const interval = setInterval(() => {
-            count--;
-            if (count > 0) {
-                numberEl.textContent = count;
-                numberEl.classList.add('pulse');
-                setTimeout(() => numberEl.classList.remove('pulse'), 300);
-            } else {
-                clearInterval(interval);
-                overlay.classList.remove('active');
-            }
-        }, 1000);
-
-        AppState.countdownInterval = interval;
+        this.bindEvents();
     },
 
-    // 更新倒计时
-    updateCountdown(seconds) {
-        const numberEl = document.getElementById('countdown-number');
-        if (numberEl) {
-            numberEl.textContent = seconds;
-        }
-    },
-
-    // 显示拍照中状态
-    showCapturingState() {
-        AppState.gameState = 'capturing';
-        const previewPanel = document.getElementById('camera-preview-panel');
-        previewPanel.classList.add('capturing');
-
-        // 显示闪烁效果
-        const flash = document.createElement('div');
-        flash.className = 'camera-flash';
-        document.body.appendChild(flash);
-
-        setTimeout(() => {
-            flash.remove();
-            previewPanel.classList.remove('capturing');
-        }, 300);
-    },
-
-    // 显示预览图像
-    showPreviewImage(base64Data) {
-        const img = document.getElementById('camera-preview-img');
-        const placeholder = document.querySelector('.preview-placeholder');
-
-        img.src = `data:image/jpeg;base64,${base64Data}`;
-        img.style.display = 'block';
-
-        if (placeholder) {
-            placeholder.style.display = 'none';
-        }
-    },
-
-    // 显示动作结果
-    showActionResult(data) {
-        AppState.gameState = 'result';
-
-        const overlay = document.getElementById('action-result-overlay');
-        const icon = document.getElementById('result-icon');
-        const score = document.getElementById('result-score');
-        const feedback = document.getElementById('result-feedback');
-
-        // 设置结果内容
-        overlay.className = 'action-result-overlay active ' + (data.success ? 'success' : 'failure');
-        icon.innerHTML = data.success ? '✓' : '✗';
-        score.textContent = Math.round(data.score * 100);
-        feedback.textContent = data.feedback;
-
-        // 显示并自动隐藏
-        setTimeout(() => {
-            overlay.classList.remove('active');
-        }, 3000);
-
-        // 更新分数显示
-        this.updateGameScore(data.score);
-    },
-
-    // 设置下一个动作
-    setupNextAction(data) {
-        // 更新目标动作显示
-        const poseImg = document.getElementById('target-pose-img');
-        const poseName = document.getElementById('target-pose-name');
-
-        if (data.action) {
-            poseImg.src = `assets/poses/${data.action.name_en}.svg`;
-            poseName.textContent = data.action.name;
-        }
-
-        // 更新进度
-        document.getElementById('current-action-num').textContent = data.action_index + 1;
-        this.updateProgressBar(data.action_index + 1);
-
-        // 重置准备按钮
-        const readyBtn = document.getElementById('btn-start-action');
-        readyBtn.disabled = false;
-        readyBtn.innerHTML = '<i class="icon-play"></i><span>准备就绪</span>';
-
-        AppState.gameState = 'idle';
-    },
-
-    // 更新游戏分数
-    updateGameScore(score) {
-        const scoreEl = document.getElementById('game-score');
-        const currentScore = parseInt(scoreEl.textContent) || 0;
-        const newScore = currentScore + Math.round(score * 100);
-
-        Utils.animateNumber(scoreEl, newScore, 500);
-    },
-
-    // 更新进度条
-    updateProgressBar(current) {
-        const total = parseInt(document.getElementById('total-action-num').textContent) || 1;
-        const percentage = (current / total) * 100;
-        document.getElementById('action-progress-fill').style.width = percentage + '%';
-    },
-
-    // 显示游戏结果
-    showGameResult(data) {
-        ScreenManager.show('result-screen');
-
-        // 更新结果数据
-        document.getElementById('final-score').textContent = data.total_score || 0;
-        document.getElementById('actions-completed').textContent =
-            `${data.actions_completed || 0}/${data.actions_total || 0}`;
-        document.getElementById('accuracy').textContent =
-            Math.round((data.completion_rate || 0) * 100) + '%';
-
-        // 更新星级
-        const stars = Math.ceil((data.completion_rate || 0) * 3);
-        document.querySelectorAll('#result-stars .star').forEach((star, index) => {
-            star.classList.toggle('active', index < stars);
+    bindEvents() {
+        // 开始挑战按钮
+        document.getElementById('btn-start-challenge').addEventListener('click', () => {
+            this.startChallenge();
         });
+
+        // 启用摄像头按钮
+        document.getElementById('btn-enable-camera').addEventListener('click', () => {
+            this.startCamera();
+        });
+
+        // 停止挑战按钮
+        document.getElementById('btn-stop-squat').addEventListener('click', () => {
+            this.stopChallenge();
+        });
+
+        // 确认成功按钮
+        document.getElementById('btn-confirm-success').addEventListener('click', () => {
+            this.returnToStart();
+        });
+    },
+
+    startChallenge() {
+        console.log('开始挑战按钮被点击');
+        console.log('当前检测器状态:', AppState.systemStatus.detectorReady);
+
+        // 检查检测器是否就绪
+        if (!AppState.systemStatus.detectorReady) {
+            Utils.showToast('深蹲检测器正在初始化，请稍候...', 'warning');
+            console.warn('检测器未就绪，无法开始挑战');
+            return;
+        }
+
+        console.log('检测器已就绪，开始挑战流程');
+
+        // 切换到深蹲页面
+        ScreenManager.show('squat-screen');
+        console.log('已切换到深蹲页面');
+
+        // 启动摄像头
+        this.startCamera();
+
+        // 通知服务器开始深蹲挑战
+        SocketManager.startSquatChallenge(5);
+    },
+
+    async startCamera() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: {
+                    width: { ideal: 640 },
+                    height: { ideal: 480 },
+                    facingMode: 'user'
+                },
+                audio: false
+            });
+
+            AppState.localStream = stream;
+            this.videoElement.srcObject = stream;
+
+            // 隐藏占位符，显示视频
+            this.cameraPlaceholder.style.display = 'none';
+            this.videoElement.style.display = 'block';
+            this.processedFrameElement.style.display = 'block';
+
+            // 开始发送视频帧
+            this.startFrameSending();
+
+            Utils.showToast('摄像头已启动', 'success');
+
+        } catch (error) {
+            console.error('启动摄像头失败:', error);
+            Utils.showToast('无法访问摄像头，请检查权限设置', 'error');
+        }
+    },
+
+    stopCamera() {
+        // 停止发送帧
+        if (this.frameInterval) {
+            clearInterval(this.frameInterval);
+            this.frameInterval = null;
+        }
+
+        // 停止视频流
+        if (AppState.localStream) {
+            AppState.localStream.getTracks().forEach(track => track.stop());
+            AppState.localStream = null;
+        }
+
+        // 隐藏视频元素
+        if (this.videoElement) {
+            this.videoElement.srcObject = null;
+            this.videoElement.style.display = 'none';
+        }
+
+        if (this.processedFrameElement) {
+            this.processedFrameElement.style.display = 'none';
+            this.processedFrameElement.src = '';
+        }
+
+        // 显示占位符
+        if (this.cameraPlaceholder) {
+            this.cameraPlaceholder.style.display = 'flex';
+        }
+    },
+
+    startFrameSending() {
+        // 每隔一定时间发送视频帧到服务器
+        const frameRate = 15; // 每秒15帧
+        const interval = 1000 / frameRate;
+
+        this.frameInterval = setInterval(() => {
+            this.captureAndSendFrame();
+        }, interval);
+    },
+
+    captureAndSendFrame() {
+        if (!this.videoElement || !AppState.isChallengeActive) return;
+
+        try {
+            // 创建canvas来捕获视频帧
+            const canvas = document.createElement('canvas');
+            canvas.width = 640;
+            canvas.height = 480;
+            const ctx = canvas.getContext('2d');
+
+            // 绘制视频帧
+            ctx.drawImage(this.videoElement, 0, 0, canvas.width, canvas.height);
+
+            // 转换为base64
+            const base64Image = canvas.toDataURL('image/jpeg', 0.7);
+
+            // 发送到服务器
+            SocketManager.sendVideoFrame(base64Image);
+
+        } catch (error) {
+            console.error('捕获帧失败:', error);
+        }
+    },
+
+    updateDisplay(data) {
+        // 更新当前计数
+        const currentCountEl = document.getElementById('current-count');
+        if (currentCountEl) {
+            currentCountEl.textContent = data.count;
+        }
+
+        // 更新进度条
+        const progressBar = document.getElementById('squat-progress-bar');
+        const progressText = document.getElementById('squat-progress-text');
+        if (progressBar && progressText) {
+            progressBar.style.width = `${data.progress}%`;
+            progressText.textContent = `${data.progress}%`;
+        }
+
+        // 更新处理后的图像
+        if (data.image && this.processedFrameElement) {
+            this.processedFrameElement.src = data.image;
+        }
+
+        // 更新状态文字
+        const statusEl = document.getElementById('squat-status');
+        if (statusEl) {
+            const state = data.state || 'unknown';
+            const stateMap = {
+                'standing': { icon: '⏳', text: '站立中，准备下蹲...' },
+                'squatting': { icon: '⬇️', text: '正在下蹲...' },
+                'deep_squat': { icon: '🔻', text: '深蹲到位！准备站起...' },
+                'rising': { icon: '⬆️', text: '正在站起...' },
+                'unknown': { icon: '⏳', text: '请站好准备开始...' }
+            };
+            const stateInfo = stateMap[state] || stateMap['unknown'];
+            statusEl.innerHTML = `
+                <span class="status-icon">${stateInfo.icon}</span>
+                <span class="status-text">${stateInfo.text}</span>
+            `;
+        }
+    },
+
+    stopChallenge() {
+        // 停止摄像头
+        this.stopCamera();
+
+        // 停止挑战
+        AppState.isChallengeActive = false;
+        SocketManager.stopSquatChallenge();
+
+        // 重置计数
+        AppState.currentCount = 0;
+
+        // 返回开始页面
+        ScreenManager.show('start-screen');
+
+        Utils.showToast('挑战已停止', 'info');
+    },
+
+    showSuccessScreen(finalCount) {
+        // 更新最终计数
+        const finalCountEl = document.getElementById('final-squat-count');
+        if (finalCountEl) {
+            finalCountEl.textContent = finalCount;
+        }
+
+        // 显示成功页面
+        ScreenManager.show('success-screen');
+    },
+
+    returnToStart() {
+        // 重置状态
+        AppState.currentCount = 0;
+        AppState.isChallengeActive = false;
+
+        // 更新计数显示
+        const currentCountEl = document.getElementById('current-count');
+        if (currentCountEl) {
+            currentCountEl.textContent = '0';
+        }
+
+        // 重置进度条
+        const progressBar = document.getElementById('squat-progress-bar');
+        const progressText = document.getElementById('squat-progress-text');
+        if (progressBar && progressText) {
+            progressBar.style.width = '0%';
+            progressText.textContent = '0%';
+        }
+
+        // 重置处理后的图像
+        if (this.processedFrameElement) {
+            this.processedFrameElement.src = '';
+        }
+
+        // 返回开始页面
+        ScreenManager.show('start-screen');
     }
 };
 
 // ============================================
-// 事件处理器
+// 系统状态检查
 // ============================================
-const EventHandlers = {
-    init() {
-        this.setupAuthEvents();
-        this.setupMenuEvents();
-        this.setupGameEvents();
-    },
-
-    // 认证相关事件
-    setupAuthEvents() {
-        // 登录/注册标签切换
-        document.querySelectorAll('.tab-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const tab = e.target.dataset.tab;
-
-                // 切换标签按钮
-                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-                e.target.classList.add('active');
-
-                // 切换表单
-                document.querySelectorAll('.auth-form').forEach(f => f.classList.remove('active'));
-                document.getElementById(`${tab}-form`).classList.add('active');
-            });
-        });
-
-        // 登录表单提交
-        document.getElementById('login-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
-
-            const username = document.getElementById('login-username').value;
-            const password = document.getElementById('login-password').value;
-
-            try {
-                const result = await API.auth.login(username, password);
-                if (result.success) {
-                    Utils.showToast('登录成功!', 'success');
-                    this.onLoginSuccess(result.data);
-                }
-            } catch (error) {
-                Utils.showToast(error.message || '登录失败', 'error');
-            }
-        });
-
-        // 注册表单提交
-        document.getElementById('register-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
-
-            const username = document.getElementById('reg-username').value;
-            const password = document.getElementById('reg-password').value;
-            const passwordConfirm = document.getElementById('reg-password-confirm').value;
-
-            if (password !== passwordConfirm) {
-                Utils.showToast('两次输入的密码不一致', 'error');
-                return;
-            }
-
-            try {
-                const result = await API.auth.register(username, password);
-                if (result.success) {
-                    Utils.showToast('注册成功!请登录', 'success');
-                    // 切换到登录标签
-                    document.querySelector('.tab-btn[data-tab="login"]').click();
-                }
-            } catch (error) {
-                Utils.showToast(error.message || '注册失败', 'error');
-            }
-        });
-    },
-
-    // 菜单相关事件
-    setupMenuEvents() {
-        // 检查系统状态
-        document.getElementById('btn-refresh-status')?.addEventListener('click', () => {
-            this.updateSystemStatus();
-        });
-    },
-
-    // 游戏相关事件
-    setupGameEvents() {
-        // 准备按钮
-        document.getElementById('btn-start-action')?.addEventListener('click', () => {
-            if (AppState.currentSession) {
-                const actionIndex = parseInt(document.getElementById('current-action-num').textContent) - 1;
-                SocketManager.playerReady(AppState.currentSession.session_id, actionIndex);
-
-                // 禁用按钮
-                const btn = document.getElementById('btn-start-action');
-                btn.disabled = true;
-                btn.innerHTML = '<i class="icon-loading"></i><span>等待中...</span>';
-            }
-        });
-
-        // 暂停按钮
-        document.getElementById('btn-pause')?.addEventListener('click', () => {
-            // 显示暂停菜单
-            this.showPauseMenu();
-        });
-
-        // 结果页面按钮
-        document.getElementById('btn-retry')?.addEventListener('click', () => {
-            // 重新开始当前关卡
-            if (AppState.currentLevel) {
-                this.startGame(AppState.currentLevel.id);
-            }
-        });
-
-        document.getElementById('btn-next-level')?.addEventListener('click', () => {
-            // 进入下一关
-            if (AppState.currentLevel) {
-                this.startGame(AppState.currentLevel.id + 1);
-            }
-        });
-
-        document.getElementById('btn-back-menu')?.addEventListener('click', () => {
-            ScreenManager.show('main-menu-screen');
-        });
-    },
-
-    // 登录成功处理
-    onLoginSuccess(userData) {
-        AppState.user = userData;
-        this.updateUserInfo(userData);
-        this.loadLevels();
-        ScreenManager.show('main-menu-screen');
-    },
-
-    // 更新用户信息显示
-    updateUserInfo(userData) {
-        document.getElementById('user-name').textContent = userData.username;
-        document.getElementById('user-level').textContent = userData.current_level;
-        document.getElementById('user-score').textContent = userData.total_score;
-    },
-
-    // 加载关卡列表
-    async loadLevels() {
-        const container = document.getElementById('levels-container');
-
+const SystemCheck = {
+    async checkDetectorStatus() {
         try {
-            const result = await API.game.getLevels();
+            const response = await fetch(`${CONFIG.API_BASE_URL}/system/status`);
+            const result = await response.json();
 
             if (result.success) {
-                container.innerHTML = '';
-
-                result.data.forEach(level => {
-                    const card = this.createLevelCard(level);
-                    container.appendChild(card);
-                });
+                AppState.systemStatus.detectorReady = result.data.squat_detector_ready;
+                this.updateStatusUI();
             }
         } catch (error) {
-            console.error('加载关卡失败:', error);
-            Utils.showToast('加载关卡失败', 'error');
+            console.error('检查系统状态失败:', error);
         }
     },
 
-    // 创建关卡卡片
-    createLevelCard(level) {
-        const card = document.createElement('div');
-        card.className = 'level-card';
-        card.dataset.levelId = level.id;
+    updateStatusUI() {
+        const dot = document.getElementById('detector-status-dot');
+        const text = document.getElementById('detector-status-text');
 
-        const isLocked = level.id > (AppState.user?.current_level || 1);
-
-        card.innerHTML = `
-            <div class="level-preview">
-                <div class="level-number">${level.id}</div>
-                ${isLocked ? '<div class="lock-icon">🔒</div>' : ''}
-            </div>
-            <div class="level-info">
-                <h3>${level.name}</h3>
-                <p class="level-description">${level.description}</p>
-                <div class="level-meta">
-                    <span class="difficulty">
-                        ${'★'.repeat(level.difficulty)}${'☆'.repeat(5 - level.difficulty)}
-                    </span>
-                    <span class="actions">${level.action_sequence?.length || 0} 个动作</span>
-                </div>
-            </div>
-        `;
-
-        if (!isLocked) {
-            card.addEventListener('click', () => {
-                this.startGame(level.id);
-            });
-        }
-
-        return card;
-    },
-
-    // 开始游戏
-    async startGame(levelId) {
-        if (!AppState.user) {
-            Utils.showToast('请先登录', 'warning');
-            ScreenManager.show('auth-screen');
-            return;
-        }
-
-        // 检查系统状态
-        if (!AppState.systemStatus.stm32Connected) {
-            Utils.showToast('开发板未连接，请检查硬件', 'error');
-            return;
-        }
-
-        try {
-            // 加载关卡详情
-            const levelResult = await API.game.getLevel(levelId);
-            if (levelResult.success) {
-                AppState.currentLevel = levelResult.data;
-                this.setupGameUI(levelResult.data);
+        if (dot && text) {
+            if (AppState.systemStatus.detectorReady) {
+                dot.classList.add('ready');
+                text.textContent = '检测器就绪';
+            } else {
+                dot.classList.remove('ready');
+                text.textContent = '检测器初始化中...';
             }
-
-            // 创建游戏会话
-            const result = await API.game.startGame(AppState.user.user_id, levelId);
-
-            if (result.success) {
-                AppState.currentSession = result.data;
-
-                // 加入WebSocket房间
-                SocketManager.joinGame(result.data.session_id);
-
-                // 切换到游戏屏幕
-                ScreenManager.show('game-screen');
-
-                // 设置第一个动作
-                if (result.data.first_action) {
-                    this.setupTargetAction(result.data.first_action);
-                }
-
-                Utils.showToast('游戏开始！准备好挑战吧！', 'success');
-            }
-        } catch (error) {
-            console.error('开始游戏失败:', error);
-            Utils.showToast(error.message || '开始游戏失败', 'error');
         }
     },
 
-    // 设置游戏UI
-    setupGameUI(levelData) {
-        document.getElementById('game-level-name').textContent = levelData.name;
-        document.getElementById('total-action-num').textContent =
-            levelData.actions?.length || levelData.action_sequence?.length || 0;
-        document.getElementById('current-action-num').textContent = '1';
-        document.getElementById('game-score').textContent = '0';
-
-        this.updateProgressBar(1);
-    },
-
-    // 设置目标动作
-    setupTargetAction(action) {
-        const img = document.getElementById('target-pose-img');
-        const name = document.getElementById('target-pose-name');
-
-        img.src = `assets/poses/${action.name_en || 'placeholder'}.svg`;
-        img.onerror = () => {
-            img.src = 'assets/poses/pose-placeholder.svg';
-        };
-
-        name.textContent = action.name || '准备动作';
-    },
-
-    // 更新系统状态显示
-    updateSystemStatus() {
-        API.system.getStatus().then(result => {
-            if (result.success) {
-                const status = result.data;
-                AppState.systemStatus = {
-                    stm32Connected: status.stm32_connected,
-                    cameraReady: status.camera_ready,
-                    mediaPipeReady: status.mediapipe_ready
-                };
-
-                // 更新UI
-                this.updateStatusIndicators();
-            }
-        }).catch(error => {
-            console.error('获取系统状态失败:', error);
-        });
-    },
-
-    // 更新状态指示器
-    updateStatusIndicators() {
-        const stm32El = document.getElementById('status-stm32');
-        const cameraEl = document.getElementById('status-camera');
-
-        if (stm32El) {
-            stm32El.classList.toggle('connected', AppState.systemStatus.stm32Connected);
-        }
-        if (cameraEl) {
-            cameraEl.classList.toggle('connected', AppState.systemStatus.cameraReady);
-        }
-    },
-
-    // 显示暂停菜单
-    showPauseMenu() {
-        // 实现暂停菜单显示逻辑
-        console.log('显示暂停菜单');
+    startStatusPolling() {
+        // 每秒检查一次状态
+        setInterval(() => {
+            this.checkDetectorStatus();
+        }, 2000);
     }
 };
 
@@ -797,22 +468,18 @@ const EventHandlers = {
 // 初始化应用
 // ============================================
 document.addEventListener('DOMContentLoaded', async () => {
-    console.log('动作闯关游戏 - 初始化中...');
+    console.log('深蹲闯关游戏 - 初始化中...');
 
     // 初始化屏幕管理器
     ScreenManager.init();
 
-    // 检查本地存储的用户信息
-    const savedUser = localStorage.getItem('user');
-    if (savedUser) {
-        AppState.user = JSON.parse(savedUser);
-        GameUI.updateUserInfo(AppState.user);
-    }
+    // 初始化深蹲UI
+    SquatUI.init();
 
     // 模拟加载过程
     const loadingTexts = [
         '正在加载资源...',
-        '初始化游戏模块...',
+        '初始化检测模型...',
         '连接服务器...',
         '准备就绪!'
     ];
@@ -832,26 +499,22 @@ document.addEventListener('DOMContentLoaded', async () => {
         console.warn('WebSocket连接失败，部分功能可能受限');
     }
 
-    // 延迟切换到主屏幕
-    await new Promise(resolve => setTimeout(resolve, 500));
+    // 启动系统状态检查
+    SystemCheck.checkDetectorStatus();
+    SystemCheck.startStatusPolling();
 
-    // 根据用户状态决定显示哪个屏幕
-    if (AppState.user) {
-        await GameUI.loadLevels();
-        ScreenManager.show('main-menu-screen');
-        GameUI.updateSystemStatus();
-    } else {
-        ScreenManager.show('auth-screen');
-    }
+    // 延迟切换到主页面
+    await new Promise(resolve => setTimeout(resolve, 500));
+    ScreenManager.show('start-screen');
 
     console.log('初始化完成!');
 });
 
 // 导出全局对象供调试
-window.ActionGame = {
+window.SquatGame = {
     AppState,
     Utils,
-    API,
-    GameUI,
-    ScreenManager
+    SocketManager,
+    ScreenManager,
+    SquatUI
 };

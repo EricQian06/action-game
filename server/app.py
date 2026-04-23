@@ -6,6 +6,10 @@ import os
 import sys
 import json
 import logging
+import base64
+import io
+import cv2
+import numpy as np
 from datetime import datetime
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
@@ -19,12 +23,16 @@ sys.path.insert(0, BASE_DIR)
 # 导入配置和模块
 from config import *
 from game_logic.game_manager import GameManager
-from pose_detection.pose_detector import PoseDetector
 from hardware.serial_manager import SerialManager
 
-# 初始化Flask应用
+# 导入深蹲检测相关模块
+sys.path.insert(0, os.path.join(BASE_DIR, 'detect'))
+from squat_detector import SquatDetector
+
+# 初始化Flask应用 - 使用项目根目录下的web文件夹作为静态文件
+web_folder = os.path.join(os.path.dirname(BASE_DIR), 'web')
 app = Flask(__name__,
-            static_folder='static',
+            static_folder=web_folder,
             static_url_path='')
 
 # 加载配置
@@ -54,6 +62,10 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+# ==================== 深蹲检测全局变量 ====================
+squat_detector = None
+squat_target_count = 5  # 目标深蹲次数
 
 # ==================== 数据库模型 ====================
 
@@ -176,7 +188,6 @@ class GameLevel(db.Model):
 
 # 管理器实例 (将在应用启动时初始化)
 game_manager = None
-pose_detector = None
 serial_manager = None
 
 # 活跃的游戏会话存储 (内存中，用于WebSocket rooms)
@@ -306,320 +317,6 @@ def start_game():
     if not user_id or not level_id:
         return jsonify({'success': False, 'error': '缺少必要参数'}), 400
 
-    # 检查串口连接
-    if serial_manager and not serial_manager.is_connected():
-        return jsonify({'success': False, 'error': 'STM32未连接', 'code': 'E001'}), 503
-
-    # 创建游戏会话
-    session = GameSession(
-        user_id=user_id,
-        level_id=level_id,
-        actions_total=len(GameLevel.query.get(level_id).action_sequence or [])
-    )
-    db.session.add(session)
-    db.session.commit()
-
-    # 初始化游戏管理器
-    game_manager.start_session(session.id, level_id)
-
-    return jsonify({
-        'success': True,
-        'data': {
-            'session_id': session.id,
-            'level_id': level_id
-        }
-    })
-
-@app.route('/api/v1/system/status', methods=['GET'])
-def system_status():
-    """获取系统状态"""
-    return jsonify({
-        'success': True,
-        'data': {
-            'stm32_connected': serial_manager.is_connected() if serial_manager else False,
-            'camera_ready': serial_manager.camera_ready if serial_manager else False,
-            'mediapipe_ready': pose_detector is not None and pose_detector.is_ready(),
-            'active_sessions': len(active_sessions)
-        }
-    })
-
-# ==================== WebSocket事件处理 ====================
-
-@socketio.on('connect')
-def handle_connect():
-    """客户端连接"""
-    logger.info(f'客户端已连接: {request.sid}')
-    emit('connected', {'status': 'ok', 'timestamp': datetime.utcnow().isoformat()})
-
-@socketio.on('disconnect')
-def handle_disconnect():
-    """客户端断开连接"""
-    logger.info(f'客户端已断开: {request.sid}')
-    # 清理该客户端相关的游戏会话
-    for session_id, session_data in list(active_sessions.items()):
-        if session_data.get('sid') == request.sid:
-            game_manager.end_session(session_id)
-            del active_sessions[session_id]
-
-@socketio.on('join_game')
-def handle_join_game(data):
-    """加入游戏"""
-    session_id = data.get('session_id')
-    if not session_id:
-        emit('error', {'code': 'E007', 'message': '缺少session_id'})
-        return
-
-    # 加入房间
-    room = f'game_{session_id}'
-    join_room(room)
-
-    # 记录会话信息
-    active_sessions[session_id] = {
-        'sid': request.sid,
-        'room': room,
-        'joined_at': datetime.utcnow()
-    }
-
-    logger.info(f'玩家加入游戏会话: {session_id}')
-    emit('joined', {'session_id': session_id, 'status': 'ok'})
-
-@socketio.on('leave_game')
-def handle_leave_game(data):
-    """离开游戏"""
-    session_id = data.get('session_id')
-    if session_id and session_id in active_sessions:
-        room = active_sessions[session_id].get('room')
-        if room:
-            leave_room(room)
-        del active_sessions[session_id]
-        game_manager.end_session(session_id)
-        logger.info(f'玩家离开游戏会话: {session_id}')
-
-    emit('left', {'status': 'ok'})
-
-@socketio.on('player_ready')
-def handle_player_ready(data):
-    """玩家准备就绪，开始倒计时"""
-    session_id = data.get('session_id')
-    action_index = data.get('action_index', 0)
-
-    if not session_id:
-        emit('error', {'code': 'E007', 'message': '会话无效'})
-        return
-
-    room = active_sessions.get(session_id, {}).get('room')
-    if not room:
-        emit('error', {'code': 'E007', 'message': '未加入游戏房间'})
-        return
-
-    logger.info(f'开始动作 {action_index} 的倒计时')
-
-    # 发送倒计时开始事件
-    socketio.emit('countdown_start', {
-        'seconds': GAME_COUNTDOWN_SECONDS,
-        'action_index': action_index
-    }, room=room)
-
-    # 使用后台任务执行倒计时
-    socketio.start_background_task(
-        countdown_and_capture,
-        session_id, room, action_index
-    )
-
-def countdown_and_capture(session_id, room, action_index):
-    """倒计时并触发拍照的后台任务"""
-    import time
-
-    # 倒计时
-    for i in range(GAME_COUNTDOWN_SECONDS, 0, -1):
-        time.sleep(1)
-        socketio.emit('countdown_tick', {
-            'seconds_remaining': i
-        }, room=room)
-
-    # 倒计时结束，触发拍照
-    time.sleep(0.5)  # 短暂延迟确保稳定性
-
-    socketio.emit('capture_triggered', {
-        'timestamp': datetime.utcnow().isoformat(),
-        'action_index': action_index
-    }, room=room)
-
-    # 触发实际的拍照流程
-    capture_and_process(session_id, room, action_index)
-
-def capture_and_process(session_id, room, action_index):
-    """拍照并处理图像"""
-    try:
-        # 1. 通过串口命令STM32拍照
-        if serial_manager and serial_manager.is_connected():
-            image_data = serial_manager.capture_image()
-
-            if not image_data:
-                socketio.emit('error', {
-                    'code': 'E003',
-                    'message': '图像获取失败'
-                }, room=room)
-                return
-
-            # 2. 保存图像并发送预览
-            import base64
-            image_b64 = base64.b64encode(image_data).decode('utf-8')
-
-            socketio.emit('preview_image', {
-                'image_base64': image_b64,
-                'action_index': action_index
-            }, room=room)
-
-            # 3. 使用MediaPipe进行姿势检测
-            if pose_detector and pose_detector.is_ready():
-                result = pose_detector.detect_pose(image_data)
-
-                if result['success']:
-                    # 4. 姿势匹配
-                    session = game_manager.get_session(session_id)
-                    if session:
-                        action = session.get_current_action()
-                        match_result = pose_detector.compare_poses(
-                            result['landmarks'],
-                            action['target_pose']
-                        )
-
-                        # 5. 发送结果
-                        socketio.emit('action_result', {
-                            'action_index': action_index,
-                            'success': match_result['success'],
-                            'score': match_result['score'],
-                            'feedback': match_result['feedback'],
-                            'detected_pose': result['landmarks']
-                        }, room=room)
-
-                        # 6. 更新游戏状态
-                        game_manager.update_action_result(
-                            session_id, action_index, match_result
-                        )
-
-                        # 7. 检查是否需要进入下一个动作
-                        next_action = game_manager.get_next_action(session_id)
-                        if next_action:
-                            socketio.emit('action_assigned', {
-                                'action_index': action_index + 1,
-                                'action': next_action,
-                                'ready_to_start': True
-                            }, room=room)
-                        else:
-                            # 游戏结束
-                            final_result = game_manager.end_session(session_id)
-                            socketio.emit('game_ended', final_result, room=room)
-                    else:
-                        socketio.emit('error', {
-                            'code': 'E007',
-                            'message': '游戏会话不存在'
-                        }, room=room)
-                else:
-                    socketio.emit('error', {
-                        'code': 'E005',
-                        'message': f'姿势检测失败: {result.get("error", "未知错误")}'
-                    }, room=room)
-            else:
-                socketio.emit('error', {
-                    'code': 'E004',
-                    'message': 'MediaPipe未就绪'
-                }, room=room)
-        else:
-            socketio.emit('error', {
-                'code': 'E001',
-                'message': 'STM32未连接'
-            }, room=room)
-
-    except Exception as e:
-        logger.error(f"拍照处理失败: {str(e)}")
-        socketio.emit('error', {
-            'code': 'E999',
-            'message': f'处理异常: {str(e)}'
-        }, room=room)
-
-# ==================== REST API路由 ====================
-    
-
-@app.route('/api/v1/auth/register', methods=['POST'])
-def register():
-    """用户注册"""
-    data = request.get_json()
-
-    if not data or not data.get('username') or not data.get('password'):
-        return jsonify({'success': False, 'error': '用户名和密码不能为空'}), 400
-
-    if User.query.filter_by(username=data['username']).first():
-        return jsonify({'success': False, 'error': '用户名已存在'}), 409
-
-    import hashlib
-    password_hash = hashlib.sha256(data['password'].encode()).hexdigest()
-
-    user = User(username=data['username'], password_hash=password_hash)
-    db.session.add(user)
-    db.session.commit()
-
-    return jsonify({
-        'success': True,
-        'data': {
-            'user_id': user.id,
-            'username': user.username
-        }
-    }), 201
-
-@app.route('/api/v1/auth/login', methods=['POST'])
-def login():
-    """用户登录"""
-    data = request.get_json()
-
-    if not data or not data.get('username') or not data.get('password'):
-        return jsonify({'success': False, 'error': '用户名和密码不能为空'}), 400
-
-    user = User.query.filter_by(username=data['username']).first()
-
-    if not user:
-        return jsonify({'success': False, 'error': '用户不存在'}), 404
-
-    import hashlib
-    password_hash = hashlib.sha256(data['password'].encode()).hexdigest()
-
-    if password_hash != user.password_hash:
-        return jsonify({'success': False, 'error': '密码错误'}), 401
-
-    user.last_login = datetime.utcnow()
-    db.session.commit()
-
-    return jsonify({
-        'success': True,
-        'data': {
-            'user_id': user.id,
-            'username': user.username,
-            'current_level': user.current_level,
-            'total_score': user.total_score
-        }
-    })
-
-@app.route('/api/v1/game/levels', methods=['GET'])
-def get_levels():
-    """获取关卡列表"""
-    levels = GameLevel.query.all()
-    return jsonify({
-        'success': True,
-        'data': [level.to_dict() for level in levels]
-    })
-
-@app.route('/api/v1/game/start', methods=['POST'])
-def start_game():
-    """开始游戏"""
-    data = request.get_json()
-
-    user_id = data.get('user_id')
-    level_id = data.get('level_id')
-
-    if not user_id or not level_id:
-        return jsonify({'success': False, 'error': '缺少必要参数'}), 400
-
     # 检查STM32连接
     if serial_manager and not serial_manager.is_connected():
         return jsonify({
@@ -657,6 +354,161 @@ def start_game():
             'first_action': first_action
         }
     })
+
+@app.route('/api/v1/system/status', methods=['GET'])
+def system_status():
+    """获取系统状态"""
+    return jsonify({
+        'success': True,
+        'data': {
+            'stm32_connected': serial_manager.is_connected() if serial_manager else False,
+            'camera_ready': serial_manager.camera_ready if serial_manager else False,
+            'squat_detector_ready': squat_detector is not None,
+            'active_sessions': len(active_sessions)
+        }
+    })
+
+# ==================== WebSocket事件处理 ====================
+
+@socketio.on('connect')
+def handle_connect():
+    """客户端连接"""
+    logger.info(f'客户端已连接: {request.sid}')
+    emit('connected', {'status': 'ok', 'timestamp': datetime.utcnow().isoformat()})
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    """客户端断开连接"""
+    logger.info(f'客户端已断开: {request.sid}')
+    # 清理该客户端相关的深蹲检测会话
+    for client_id, session_data in list(active_sessions.items()):
+        if session_data.get('sid') == request.sid:
+            del active_sessions[client_id]
+            logger.info(f'清理深蹲会话: {client_id}')
+
+@socketio.on('start_squat_challenge')
+def handle_start_squat_challenge(data):
+    """开始深蹲挑战"""
+    global squat_detector
+    client_id = request.sid
+
+    logger.info(f'开始深蹲挑战: {client_id}')
+
+    try:
+        # 初始化深蹲检测器（如果尚未初始化）
+        if squat_detector is None:
+            samples_path = os.path.join(BASE_DIR, 'detect', 'pose_samples')
+            squat_detector = SquatDetector(
+                pose_samples_folder=samples_path,
+                confidence_threshold=0.6,
+                display_size=(640, 480)
+            )
+            logger.info("深蹲检测器初始化完成")
+
+        # 重置计数器
+        squat_detector.squat_counter.reset()
+
+        # 记录会话
+        active_sessions[client_id] = {
+            'sid': request.sid,
+            'type': 'squat_challenge',
+            'started_at': datetime.utcnow(),
+            'target_count': data.get('target_count', 5)
+        }
+
+        emit('squat_challenge_started', {
+            'target_count': active_sessions[client_id]['target_count'],
+            'message': '深蹲挑战开始！请面对摄像头做好准备。'
+        })
+
+        logger.info(f"深蹲挑战已启动，目标次数: {active_sessions[client_id]['target_count']}")
+
+    except Exception as e:
+        logger.error(f"启动深蹲挑战失败: {str(e)}")
+        emit('squat_error', {'message': f'启动失败: {str(e)}'})
+
+@socketio.on('video_frame')
+def handle_video_frame(data):
+    """接收视频帧并进行深蹲检测"""
+    global squat_detector
+    client_id = request.sid
+
+    # 检查是否有活跃的深蹲会话
+    if client_id not in active_sessions:
+        return
+
+    session = active_sessions[client_id]
+    if session.get('type') != 'squat_challenge':
+        return
+
+    try:
+        # 解码base64图像数据
+        image_data = data.get('image', '')
+        if not image_data:
+            return
+
+        # 移除data URL前缀
+        if ',' in image_data:
+            image_data = image_data.split(',')[1]
+
+        # Base64解码
+        img_bytes = base64.b64decode(image_data)
+        nparr = np.frombuffer(img_bytes, np.uint8)
+        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+        if frame is None:
+            return
+
+        # 处理帧
+        if squat_detector is not None:
+            annotated_frame, results = squat_detector.process_frame(frame)
+
+            # 将处理后的图像编码为base64
+            _, buffer = cv2.imencode('.jpg', annotated_frame)
+            processed_image = base64.b64encode(buffer).decode('utf-8')
+
+            # 获取当前计数
+            squat_count = results.get('squat_count', 0)
+            target_count = session.get('target_count', 5)
+
+            # 发送处理结果
+            emit('squat_update', {
+                'count': squat_count,
+                'target': target_count,
+                'state': results.get('state', 'unknown'),
+                'image': f'data:image/jpeg;base64,{processed_image}',
+                'progress': min(100, int(squat_count / target_count * 100))
+            })
+
+            # 检查是否达到目标
+            if squat_count >= target_count:
+                # 挑战完成
+                emit('squat_completed', {
+                    'final_count': squat_count,
+                    'message': '恭喜！你已完成5个深蹲，闯关成功！'
+                })
+
+                # 清理会话
+                if client_id in active_sessions:
+                    del active_sessions[client_id]
+
+                logger.info(f"深蹲挑战完成: {client_id}, 最终次数: {squat_count}")
+
+    except Exception as e:
+        logger.error(f"处理视频帧失败: {str(e)}")
+        emit('squat_error', {'message': f'处理失败: {str(e)}'})
+
+@socketio.on('stop_squat_challenge')
+def handle_stop_squat_challenge(data):
+    """停止深蹲挑战"""
+    client_id = request.sid
+
+    logger.info(f'停止深蹲挑战: {client_id}')
+
+    if client_id in active_sessions:
+        del active_sessions[client_id]
+
+    emit('squat_stopped', {'message': '深蹲挑战已停止'})
 
 # ==================== 初始化函数 ====================
 
@@ -714,19 +566,11 @@ def init_database():
 
 def init_managers():
     """初始化各个管理器"""
-    global game_manager, pose_detector, serial_manager
+    global game_manager, serial_manager, squat_detector
 
     # 初始化游戏管理器
     game_manager = GameManager()
     logger.info('游戏管理器已初始化')
-
-    # 初始化姿势检测器
-    try:
-        pose_detector = PoseDetector()
-        logger.info('姿势检测器已初始化')
-    except Exception as e:
-        logger.error(f'姿势检测器初始化失败: {e}')
-        pose_detector = None
 
     # 初始化串口管理器
     try:
@@ -741,6 +585,22 @@ def init_managers():
     except Exception as e:
         logger.warning(f'串口管理器初始化失败(可能未连接设备): {e}')
         serial_manager = None
+
+    # 初始化深蹲检测器
+    try:
+        samples_path = os.path.join(BASE_DIR, 'detect', 'pose_samples')
+        if os.path.exists(samples_path):
+            squat_detector = SquatDetector(
+                pose_samples_folder=samples_path,
+                confidence_threshold=0.6,
+                display_size=(640, 480)
+            )
+            logger.info('深蹲检测器已初始化')
+        else:
+            logger.warning(f'姿态样本文件夹不存在: {samples_path}')
+    except Exception as e:
+        logger.error(f'深蹲检测器初始化失败: {e}')
+        squat_detector = None
 
 # ==================== 主程序入口 ====================
 

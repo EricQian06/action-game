@@ -1,13 +1,18 @@
-flask
-flask-socketio
-flask-cors
-flask-sqlalchemy
-mediapipe
-opencv-python
-pyserial
-numpy
 pillow
-websockets
-eventlet
-python-socketio
-werkzeug
+matplotlib
+numpy
+opencv-python
+tqdm
+requests
+mediapipe
+
+
+# flask
+# flask-socketio
+# flask-cors
+# flask-sqlalchemy
+# pyserial
+# websockets
+# eventlet
+# python-socketio
+# werkzeug

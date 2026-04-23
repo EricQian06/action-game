@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(findstr:*)",
+      "Bash(cd:*)",
+      "Bash(dir:*)",
+      "Bash(node:*)"
+    ]
+  }
+}
