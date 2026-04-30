@@ -10,14 +10,15 @@
         .container { max-width: 960px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 12px; box-shadow: 0 6px 16px rgba(0,0,0,0.1); }
         h1 { text-align: center; color: #2c3e50; margin-bottom: 10px; }
         .subtitle { text-align: center; color: #7f8c8d; margin-bottom: 20px; }
-        
+
         .game-area { display: flex; flex-wrap: wrap; justify-content: center; gap: 20px; margin: 20px 0; }
         .panel { flex: 1; min-width: 320px; text-align: center; }
         .panel h3 { margin-top: 0; color: #34495e; }
-        
-        video, img { width: 100%; max-width: 480px; border-radius: 8px; background: #000; object-fit: cover; }
-        img { border: 3px solid #3498db; min-height: 300px; background: #ecf0f1; }
-        
+
+        img { width: 100%; max-width: 480px; border-radius: 8px; background: #000; object-fit: cover; }
+        .preview-img { border: 3px solid #3498db; min-height: 300px; background: #ecf0f1; }
+        .captured-img { border: 3px solid #27ae60; }
+
         .controls { text-align: center; margin-top: 20px; }
         button { padding: 12px 24px; font-size: 16px; cursor: pointer; border: none; border-radius: 6px; margin: 5px; transition: 0.2s; }
         button:disabled { opacity: 0.6; cursor: not-allowed; }
@@ -25,7 +26,7 @@
         #captureBtn { background: #2980b9; color: white; display: none; }
         #nextBtn { background: #e67e22; color: white; display: none; }
         button:hover:not(:disabled) { filter: brightness(1.1); transform: translateY(-1px); }
-        
+
         .status { text-align: center; margin: 15px 0; font-weight: 500; min-height: 24px; color: #555; }
         .hidden { display: none !important; }
 
@@ -65,9 +66,6 @@
             border-radius: 10px;
             transition: width 1s ease;
         }
-        .match-high { color: #27ae60; }
-        .match-medium { color: #f39c12; }
-        .match-low { color: #e74c3c; }
 
         @keyframes fadeIn {
             from { opacity: 0; transform: translateY(-10px); }
@@ -84,25 +82,45 @@
             font-size: 14px;
             margin: 5px;
         }
+
+        /* 等待提示 */
+        .waiting-box {
+            width: 100%;
+            max-width: 480px;
+            min-height: 300px;
+            border: 3px dashed #bdc3c7;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: #ecf0f1;
+            color: #7f8c8d;
+        }
+        .waiting-box .icon { font-size: 48px; margin-bottom: 10px; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>🎮 动作模仿挑战</h1>
-        <p class="subtitle" id="statusText">点击“开始游戏”启动摄像头并获取任务</p>
-        
+        <p class="subtitle" id="statusText">点击"开始游戏"获取任务</p>
+
         <div class="game-area">
             <div class="panel">
-                <h3>📷 实时画面</h3>
-                <video id="webcam" autoplay playsinline muted></video>
+                <h3>📷 你的动作</h3>
+                <div id="waitingBox" class="waiting-box">
+                    <div class="icon">📷</div>
+                    <div>等待硬件拍照...</div>
+                </div>
+                <img id="capturedImage" src="" alt="拍摄结果" style="display:none;" class="captured-img">
             </div>
             <div class="panel">
                 <h3>🎯 目标动作</h3>
-                <img id="targetImage" src="" alt="等待加载..." style="display:none;">
+                <img id="targetImage" src="" alt="等待加载..." style="display:none;" class="preview-img">
                 <p id="imageHint" style="color:#888; margin-top:10px;">请先开始游戏</p>
             </div>
         </div>
-        
+
         <!-- 评分显示面板 -->
         <div id="scorePanel" class="score-panel">
             <div class="score-label">动作匹配度</div>
@@ -116,14 +134,15 @@
 
         <div class="controls">
             <button id="startBtn">开始游戏</button>
-            <button id="captureBtn">✅ 确定/拍照提交</button>
+            <button id="captureBtn">📷 硬件拍照并评分</button>
             <button id="nextBtn">🔄 下一个动作</button>
         </div>
     </div>
 
     <script>
-        const video = document.getElementById('webcam');
         const targetImage = document.getElementById('targetImage');
+        const capturedImage = document.getElementById('capturedImage');
+        const waitingBox = document.getElementById('waitingBox');
         const startBtn = document.getElementById('startBtn');
         const captureBtn = document.getElementById('captureBtn');
         const nextBtn = document.getElementById('nextBtn');
@@ -137,22 +156,13 @@
         const scoreMessage = document.getElementById('scoreMessage');
         const targetActionDisplay = document.getElementById('targetActionDisplay');
 
-        let stream = null;
-        let currentTargetAction = 'squat'; // 当前目标动作
+        let currentTargetAction = 'squat';
 
-        // 1. 启动摄像头 & 获取首个任务
+        // 1. 开始游戏 - 获取首个任务
         startBtn.addEventListener('click', async () => {
-            try {
-                statusText.textContent = "正在申请摄像头权限...";
-                stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 }, audio: false });
-                video.srcObject = stream;
-                statusText.textContent = "摄像头已就绪，正在分配动作任务...";
-                startBtn.disabled = true;
-                await loadNextAction();
-            } catch (err) {
-                statusText.textContent = "❌ 摄像头启动失败: " + err.message;
-                console.error(err);
-            }
+            statusText.textContent = "正在分配动作任务...";
+            startBtn.disabled = true;
+            await loadNextAction();
         });
 
         // 2. 请求后端获取随机不重复图片
@@ -162,15 +172,19 @@
                 nextBtn.style.display = 'none';
                 imageHint.style.display = 'block';
                 imageHint.textContent = "加载中...";
-                
+
+                // 重置拍摄显示
+                capturedImage.style.display = 'none';
+                waitingBox.style.display = 'flex';
+
                 const res = await fetch('/api/get_action_image');
                 const data = await res.json();
-                
+
                 if (data.status === 'success') {
                     targetImage.src = data.image_url;
                     targetImage.style.display = 'inline-block';
                     imageHint.style.display = 'none';
-                    statusText.textContent = "👉 请模仿屏幕中的动作，完成后点击确定提交";
+                    statusText.textContent = "👉 请模仿屏幕中的动作，完成后点击拍照";
                     captureBtn.style.display = 'inline-block';
                     captureBtn.disabled = false;
 
@@ -189,86 +203,53 @@
             }
         }
 
-        // 3. 拍照并上传
+        // 3. 硬件拍照并评分
         captureBtn.addEventListener('click', async () => {
-            if (!stream || !video.videoWidth) return;
-            
             captureBtn.disabled = true;
-            statusText.textContent = "📸 正在拍照并上传...";
-            
-            // 创建离屏 Canvas 截取当前帧
-            const canvas = document.createElement('canvas');
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            
-            // 转为 Blob 文件
-            canvas.toBlob(async (blob) => {
-                const formData = new FormData();
-                formData.append('photo', blob, `capture_${Date.now()}.jpg`);
-                
-                try {
-                    const res = await fetch('/api/save_gamer_photo', { method: 'POST', body: formData });
-                    const result = await res.json();
-                    
-                    if (result.status === 'success') {
-                        statusText.textContent = "✅ 照片已保存，正在评分...";
-                        // 调用评分接口
-                        scoreGamerPhoto(result.filename, currentTargetAction);
-                    } else {
-                        statusText.textContent = "❌ 上传失败: " + result.message;
-                        captureBtn.disabled = false;
-                    }
-                } catch (err) {
-                    statusText.textContent = "❌ 上传异常: " + err.message;
-                    captureBtn.disabled = false;
-                }
-            }, 'image/jpeg', 0.85);
-        });
+            statusText.textContent = "📷 正在通过硬件摄像头拍照...";
 
-        // 4. 切换到下一个动作
-        nextBtn.addEventListener('click', () => {
-            // 隐藏评分面板
-            scorePanel.classList.remove('show');
-            loadNextAction();
-        });
-
-        // 评分功能：调用后端评分接口
-        async function scoreGamerPhoto(filename, targetAction) {
             try {
-                statusText.textContent = "🔄 正在进行动作评分...";
-
-                const res = await fetch('/api/score_photo', {
+                // 调用拍照+评分接口
+                const res = await fetch('/api/capture_and_score', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        filename: filename,
-                        target_action: targetAction
+                        target_action: currentTargetAction
                     })
                 });
 
                 const result = await res.json();
 
                 if (result.status === 'success') {
-                    // 显示评分面板
+                    // 显示拍摄的照片
+                    waitingBox.style.display = 'none';
+                    capturedImage.src = result.image_path + '?t=' + Date.now();
+                    capturedImage.style.display = 'inline-block';
+
+                    // 显示评分
                     displayScore(result);
 
                     statusText.textContent = `✅ 评分完成！相似度: ${(result.score * 100).toFixed(1)}%`;
                     captureBtn.style.display = 'none';
                     nextBtn.style.display = 'inline-block';
                 } else {
-                    statusText.textContent = "❌ 评分失败: " + result.message;
-                    captureBtn.style.display = 'none';
-                    nextBtn.style.display = 'inline-block';
+                    statusText.textContent = "❌ " + result.message;
+                    captureBtn.disabled = false;
                 }
             } catch (err) {
-                console.error('评分请求失败:', err);
-                statusText.textContent = "❌ 评分请求失败: " + err.message;
-                captureBtn.style.display = 'none';
-                nextBtn.style.display = 'inline-block';
+                console.error('请求失败:', err);
+                statusText.textContent = "❌ 请求失败: " + err.message;
+                captureBtn.disabled = false;
             }
-        }
+        });
+
+        // 4. 切换到下一个动作
+        nextBtn.addEventListener('click', () => {
+            scorePanel.classList.remove('show');
+            capturedImage.style.display = 'none';
+            waitingBox.style.display = 'flex';
+            loadNextAction();
+        });
 
         // 显示评分结果
         function displayScore(result) {
@@ -277,11 +258,9 @@
             const matchLevel = result.match_level;
             const matchText = result.match_text;
 
-            // 更新分数显示
             scoreValue.textContent = percentage + '%';
             scoreBarFill.style.width = percentage + '%';
 
-            // 根据匹配等级设置颜色
             scorePanel.className = 'score-panel show';
             if (matchLevel === 'high') {
                 scorePanel.style.background = 'linear-gradient(135deg, #11998e 0%, #38ef7d 100%)';
@@ -294,7 +273,6 @@
                 scoreMessage.innerHTML = `<span style="font-size: 24px;">💪</span> ${matchText}，再试一次会更好`;
             }
 
-            // 显示目标动作
             const actionNames = {
                 'squat': '深蹲',
                 'standing': '站立',
@@ -306,21 +284,6 @@
             const actionName = actionNames[result.target_action] || result.target_action;
             targetActionDisplay.innerHTML = `目标动作: <span class="action-tag">${actionName}</span>`;
         }
-    </script>
-</body>
-</html>
-                'standing': '站立',
-                'hands_up': '举手',
-                'stride': '跨步'
-            };
-            const actionName = actionNames[result.target_action] || result.target_action;
-            targetActionDisplay.innerHTML = `目标动作: <span class="action-tag">${actionName}</span>`;
-        }
-
-        // 页面关闭时释放摄像头
-        window.addEventListener('beforeunload', () => {
-            if (stream) stream.getTracks().forEach(track => track.stop());
-        });
     </script>
 </body>
 </html>

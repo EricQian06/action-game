@@ -15,7 +15,9 @@ os.makedirs(GAMER_DIR, exist_ok=True)
 # 添加server目录到Python路径以导入动作识别模块
 PROJECT_DIR = os.path.dirname(BASE_DIR)
 SERVER_DIR = os.path.join(PROJECT_DIR, 'server')
+HARDWARE_DIR = os.path.join(PROJECT_DIR, 'hardware')
 sys.path.insert(0, SERVER_DIR)
+sys.path.insert(0, HARDWARE_DIR)
 
 # 导入键盘模拟功能和动作识别API
 try:
@@ -33,6 +35,15 @@ try:
 except Exception as e:
     print(f"[Warning] 动作识别API初始化失败: {e}")
     action_api = None
+
+# 导入硬件摄像头模块
+try:
+    from hardware_camera import HardwareCamera
+    hardware_camera = HardwareCamera(port='COM11')
+    print("[Info] 硬件摄像头模块加载成功")
+except Exception as e:
+    print(f"[Warning] 硬件摄像头模块加载失败: {e}")
+    hardware_camera = None
 
 app = Flask(__name__)
 app.secret_key = 'your_secret_key_here'  # 用于会话管理和闪存消息，生产环境请更换为复杂随机字符串
@@ -202,6 +213,132 @@ def save_gamer_photo():
         'filename': new_filename,
         'target_action': target_action
     })
+
+#capture_hardware
+@app.route('/api/capture_hardware', methods=['POST'])
+def capture_hardware():
+    """
+    触发硬件摄像头拍照
+    通过串口发送指令给STM32，接收图像并保存到 server/input.jpg
+    """
+    if hardware_camera is None:
+        return jsonify({
+            'status': 'error',
+            'message': '硬件摄像头模块未初始化，请检查串口连接和硬件模块'
+        }), 500
+
+    try:
+        # 拍照并保存到 server/input.jpg
+        input_path = os.path.join(SERVER_DIR, 'input.jpg')
+        result = hardware_camera.capture(output_path=input_path)
+
+        if result['success']:
+            return jsonify({
+                'status': 'success',
+                'message': result['message'],
+                'image_path': '/api/input_image.jpg',
+                'saved_path': result['path']
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': result['message']
+            }), 500
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'status': 'error',
+            'message': f'硬件拍照出错: {str(e)}'
+        }), 500
+
+
+#serve_input_image
+@app.route('/api/input_image.jpg')
+def serve_input_image():
+    """提供 server/input.jpg 图片"""
+    return send_from_directory(SERVER_DIR, 'input.jpg')
+
+
+#capture_and_score
+@app.route('/api/capture_and_score', methods=['POST'])
+def capture_and_score():
+    """
+    一键拍照+评分
+    1. 触发硬件摄像头拍照
+    2. 对拍摄的照片进行动作评分
+    """
+    data = request.get_json() or {}
+    target_action = data.get('target_action', session.get('current_action', 'squat'))
+
+    # 检查硬件摄像头
+    if hardware_camera is None:
+        return jsonify({
+            'status': 'error',
+            'message': '硬件摄像头模块未初始化'
+        }), 500
+
+    # 检查动作识别API
+    if action_api is None:
+        return jsonify({
+            'status': 'error',
+            'message': '动作识别API未初始化'
+        }), 500
+
+    try:
+        # Step 1: 拍照
+        input_path = os.path.join(SERVER_DIR, 'input.jpg')
+        capture_result = hardware_camera.capture(output_path=input_path)
+
+        if not capture_result['success']:
+            return jsonify({
+                'status': 'error',
+                'message': f'拍照失败: {capture_result["message"]}'
+            }), 500
+
+        # Step 2: 评分
+        score_result = action_api.recognize(input_path, target_action)
+
+        if not score_result['success']:
+            return jsonify({
+                'status': 'error',
+                'message': score_result.get('error', '评分失败'),
+                'capture_success': True
+            }), 500
+
+        score = score_result['score']
+
+        # 判断匹配等级
+        if score >= 0.7:
+            match_level = 'high'
+            match_text = '高度匹配'
+        elif score >= 0.4:
+            match_level = 'medium'
+            match_text = '基本匹配'
+        else:
+            match_level = 'low'
+            match_text = '匹配度低'
+
+        return jsonify({
+            'status': 'success',
+            'score': round(score, 4),
+            'match_level': match_level,
+            'match_text': match_text,
+            'target_action': target_action,
+            'image_path': '/api/input_image.jpg',
+            'landmarks_detected': score_result.get('landmarks_detected', False),
+            'message': capture_result['message']
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'status': 'error',
+            'message': f'拍照评分出错: {str(e)}'
+        }), 500
+
 
 #score_gamer_photo
 @app.route('/api/score_photo', methods=['POST'])

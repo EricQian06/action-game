@@ -125,19 +125,33 @@ int main(void)
 
 		}
 		
+		/* 检测串口接收命令 (PC端发送 'C' 触发拍照) */
+		if(USART_GetFlagStatus(DEBUG_USARTx, USART_FLAG_RXNE) != RESET)
+		{
+			uint8_t cmd = USART_ReceiveData(DEBUG_USARTx);
+			if(cmd == 'C')  /* 'C' = Capture 拍照指令 */
+			{
+				LED2_TOGGLE;
+				// 捕获并传输图像
+				printf("Capturing and transmitting image...\r\n");
+				uint32_t size = CaptureAndTransmitImage(cam_mode.cam_width, cam_mode.cam_height, 1);
+				printf("Image transmitted. Compressed size: %lu bytes\r\n", size);
+			}
+		}
+
 		/*��ⰴ��*/
 		if( Key_Scan(KEY1_GPIO_PORT,KEY1_GPIO_PIN) == KEY_ON  )
 		{
 			/*LED��ת*/
 			LED2_TOGGLE;
 
-		} 
+		}
 		/*��ⰴ��*/
 		if( Key_Scan(KEY2_GPIO_PORT,KEY2_GPIO_PIN) == KEY_ON  )
 		{
 			/*LED��ת*/
 			LED3_TOGGLE;
-			
+
 			// 捕获并传输图像
 			printf("Capturing and transmitting image...\r\n");
 			uint32_t size = CaptureAndTransmitImage(cam_mode.cam_width, cam_mode.cam_height, 1);
