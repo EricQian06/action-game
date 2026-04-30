@@ -5,7 +5,8 @@
       "Bash(cd:*)",
       "Bash(dir:*)",
       "Bash(node:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(git push:*)"
     ]
   }
 }
