@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>选择关卡 - 动作捕捉游戏</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        body {
+            font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        /* 星星粒子 */
+        .stars {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            pointer-events: none;
+            z-index: 0;
+        }
+        .star {
+            position: absolute;
+            background: white;
+            border-radius: 50%;
+            animation: twinkle var(--dur) ease-in-out infinite;
+            animation-delay: var(--delay);
+            opacity: 0;
+        }
+        @keyframes twinkle {
+            0%, 100% { opacity: 0; transform: scale(0.5); }
+            50% { opacity: var(--opacity); transform: scale(1); }
+        }
+
+        /* 星云光晕 */
+        .nebula {
+            position: fixed;
+            border-radius: 50%;
+            filter: blur(80px);
+            opacity: 0.15;
+            pointer-events: none;
+            z-index: 0;
+            animation: nebulaFloat 15s ease-in-out infinite;
+        }
+        .nebula-1 { width: 400px; height: 400px; background: #667eea; top: -5%; left: 10%; animation-delay: 0s; }
+        .nebula-2 { width: 350px; height: 350px; background: #764ba2; bottom: -8%; right: 8%; animation-delay: -7s; }
+        .nebula-3 { width: 280px; height: 280px; background: #f093fb; top: 40%; left: 60%; animation-delay: -12s; }
+        @keyframes nebulaFloat {
+            0%, 100% { transform: translate(0, 0) scale(1); }
+            33% { transform: translate(40px, -30px) scale(1.1); }
+            66% { transform: translate(-30px, 20px) scale(0.95); }
+        }
+
+        .container {
+            position: relative;
+            z-index: 1;
+            background: rgba(255, 255, 255, 0.06);
+            backdrop-filter: blur(20px);
+            border-radius: 24px;
+            padding: 35px 30px;
+            max-width: 960px;
+            width: 95%;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            box-shadow: 0 25px 60px rgba(0,0,0,0.4);
+        }
+
+        h1 {
+            text-align: center;
+            font-size: 2.2em;
+            margin-bottom: 6px;
+            background: linear-gradient(45deg, #a78bfa, #f0abfc, #67e8f9);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .subtitle {
+            text-align: center;
+            color: rgba(255,255,255,0.55);
+            font-size: 0.95em;
+            margin-bottom: 20px;
+        }
+
+        /* 信息栏 */
+        .info-bar {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            margin-bottom: 25px;
+            flex-wrap: wrap;
+        }
+        .info-item {
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 14px;
+            padding: 12px 22px;
+            text-align: center;
+            min-width: 100px;
+        }
+        .info-label {
+            font-size: 0.75em;
+            color: rgba(255,255,255,0.5);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 4px;
+        }
+        .info-value {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #f0abfc;
+        }
+
+        /* 关卡地图 */
+        .map-wrapper {
+            position: relative;
+            width: 100%;
+            margin: 10px 0 20px;
+            overflow-x: auto;
+        }
+        .map-svg {
+            display: block;
+            margin: 0 auto;
+            max-width: 100%;
+        }
+
+        /* 关卡盒子（absolute positioned inside SVG foreignObject） */
+        .level-node {
+            width: 64px;
+            height: 64px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 16px;
+            font-weight: 800;
+            font-size: 20px;
+            color: #555;
+            background: rgba(200, 200, 210, 0.35);
+            border: 2px solid rgba(200, 200, 210, 0.4);
+            transition: all 0.35s ease;
+            cursor: default;
+            backdrop-filter: blur(4px);
+            position: relative;
+        }
+        .level-node.current {
+            background: linear-gradient(135deg, #667eea, #a78bfa);
+            color: #fff;
+            border-color: #a78bfa;
+            box-shadow: 0 0 24px rgba(167, 139, 250, 0.55);
+            animation: nodePulse 2s ease-in-out infinite;
+            cursor: pointer;
+        }
+        .level-node.completed {
+            background: linear-gradient(135deg, #10b981, #34d399);
+            color: #fff;
+            border-color: #34d399;
+            cursor: pointer;
+        }
+        .level-node.completed:hover,
+        .level-node.current:hover {
+            transform: scale(1.1);
+            box-shadow: 0 0 30px rgba(167, 139, 250, 0.7);
+        }
+        .level-node.locked {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        @keyframes nodePulse {
+            0%, 100% { box-shadow: 0 0 20px rgba(167, 139, 250, 0.5); }
+            50% { box-shadow: 0 0 36px rgba(167, 139, 250, 0.75); }
+        }
+
+        /* 关卡标签 */
+        .node-label {
+            position: absolute;
+            bottom: -22px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 11px;
+            color: rgba(255,255,255,0.45);
+            white-space: nowrap;
+            pointer-events: none;
+        }
+        .node-label .check {
+            color: #34d399;
+            margin-right: 2px;
+        }
+
+        /* 按钮 */
+        .btn-row {
+            display: flex;
+            justify-content: center;
+            gap: 16px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+        .btn {
+            padding: 14px 30px;
+            border: none;
+            border-radius: 50px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.2);
+        }
+        .btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 28px rgba(0,0,0,0.3);
+        }
+        .btn-continue {
+            background: linear-gradient(135deg, #667eea, #a78bfa);
+            color: white;
+        }
+        .btn-logout {
+            background: rgba(255,255,255,0.1);
+            color: rgba(255,255,255,0.7);
+            border: 1px solid rgba(255,255,255,0.15);
+        }
+
+        .empty-hint {
+            text-align: center;
+            color: rgba(255,255,255,0.4);
+            font-size: 0.95em;
+            padding: 40px;
+        }
+
+        @media (max-width: 768px) {
+            .container { padding: 20px 15px; }
+            h1 { font-size: 1.6em; }
+            .level-node { width: 48px; height: 48px; font-size: 16px; border-radius: 12px; }
+        }
+    </style>
+</head>
+<body>
+    <!-- 背景装饰 -->
+    <div class="stars" id="stars"></div>
+    <div class="nebula nebula-1"></div>
+    <div class="nebula nebula-2"></div>
+    <div class="nebula nebula-3"></div>
+
+    <div class="container">
+        <h1>🗺️ 关卡地图</h1>
+        <p class="subtitle" id="playerName">玩家：{{ session['username'] }}</p>
+
+        <div class="info-bar">
+            <div class="info-item">
+                <div class="info-label">已完成</div>
+                <div class="info-value"><span id="infoCompleted">0</span>/<span id="infoTotal">0</span></div>
+            </div>
+            <div class="info-item">
+                <div class="info-label">总得分</div>
+                <div class="info-value" id="infoScore">0</div>
+            </div>
+        </div>
+
+        <div class="map-wrapper" id="mapWrapper">
+            <div class="empty-hint" id="emptyHint">加载关卡数据中...</div>
+            <svg id="mapSvg" class="map-svg" style="display:none;"></svg>
+        </div>
+
+        <div class="btn-row">
+            <button class="btn btn-continue" id="btnContinue" onclick="continueGame()">
+                <span>▶</span> 继续游戏
+            </button>
+            <button class="btn btn-logout" onclick="window.location.href='/logout'">
+                <span>🚪</span> 退出登录
+            </button>
+        </div>
+    </div>
+
+    <script>
+        let totalLevels = 0;
+        let completedLevels = 0;    // 已完成关卡数
+        let currentLevel = 1;       // 当前可挑战的关卡 = completedLevels + 1
+
+        // 生成星星背景
+        (function() {
+            const starsEl = document.getElementById('stars');
+            for (let i = 0; i < 80; i++) {
+                const star = document.createElement('div');
+                star.className = 'star';
+                const size = Math.random() * 2.5 + 0.8;
+                star.style.width = size + 'px';
+                star.style.height = size + 'px';
+                star.style.left = Math.random() * 100 + '%';
+                star.style.top = Math.random() * 100 + '%';
+                star.style.setProperty('--dur', (Math.random() * 3 + 2) + 's');
+                star.style.setProperty('--delay', (Math.random() * 5) + 's');
+                star.style.setProperty('--opacity', (Math.random() * 0.6 + 0.2));
+                starsEl.appendChild(star);
+            }
+        })();
+
+        // 加载进度
+        async function loadProgress() {
+            try {
+                const res = await fetch('/api/load_progress');
+                const data = await res.json();
+                if (data.status === 'success') {
+                    completedLevels = data.completed;
+                    totalLevels = data.total;
+                    currentLevel = completedLevels + 1;
+                    if (currentLevel > totalLevels) currentLevel = totalLevels;
+                    
+                    document.getElementById('infoCompleted').textContent = completedLevels;
+                    document.getElementById('infoTotal').textContent = totalLevels;
+                    document.getElementById('infoScore').textContent = data.score;
+                    
+                    if (totalLevels === 0) {
+                        document.getElementById('emptyHint').textContent = '暂无关卡数据（sample_photos 为空）';
+                        document.getElementById('mapSvg').style.display = 'none';
+                    } else {
+                        document.getElementById('emptyHint').style.display = 'none';
+                        document.getElementById('mapSvg').style.display = 'block';
+                        renderMap();
+                    }
+                }
+            } catch (e) {
+                console.error('加载进度失败:', e);
+                document.getElementById('emptyHint').textContent = '加载失败，请刷新页面';
+            }
+        }
+
+        // 蛇形布局计算
+        function getSnakePositions(n, cols) {
+            const positions = [];
+            const gx = 110;   // 格子宽度间距
+            const gy = 105;   // 格子高度间距
+            const startX = 60;
+            const startY = 50;
+            
+            for (let i = 0; i < n; i++) {
+                const row = Math.floor(i / cols);
+                const colInRow = i % cols;
+                let col = (row % 2 === 0) ? colInRow : (cols - 1 - colInRow);
+                positions.push({
+                    x: startX + col * gx,
+                    y: startY + row * gy
+                });
+            }
+            return positions;
+        }
+
+        // 渲染关卡地图
+        function renderMap() {
+            const svg = document.getElementById('mapSvg');
+            svg.innerHTML = '';
+            
+            const cols = 4;  // 每行放4个
+            const positions = getSnakePositions(totalLevels, cols);
+            const rows = Math.ceil(totalLevels / cols);
+            const svgWidth = cols * 110 + 40;
+            const svgHeight = rows * 105 + 60;
+            
+            svg.setAttribute('viewBox', `0 0 ${svgWidth} ${svgHeight}`);
+            svg.setAttribute('width', svgWidth);
+            svg.setAttribute('height', svgHeight);
+            svg.style.maxWidth = '100%';
+            svg.style.height = 'auto';
+            
+            // 定义弧线标记（箭头）
+            const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+            defs.innerHTML = `
+                <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                    <polygon points="0 0, 10 3.5, 0 7" fill="rgba(255,255,255,0.35)" />
+                </marker>
+            `;
+            svg.appendChild(defs);
+            
+            const nodeSize = 64;
+            const nodeRadius = 16;
+            
+            // 画曲线连接
+            for (let i = 0; i < totalLevels - 1; i++) {
+                const from = positions[i];
+                const to = positions[i + 1];
+                
+                const x1 = from.x + nodeSize / 2;
+                const y1 = from.y + nodeSize / 2;
+                const x2 = to.x + nodeSize / 2;
+                const y2 = to.y + nodeSize / 2;
+                
+                // 贝塞尔曲线：水平方向弯曲
+                let cp1x, cp1y, cp2x, cp2y;
+                if (Math.abs(y2 - y1) < 10) {
+                    // 同一行：水平弧线
+                    const midY = y1;
+                    cp1x = x1 + Math.abs(x2 - x1) * 0.4;
+                    cp1y = midY - 35;
+                    cp2x = x2 - Math.abs(x2 - x1) * 0.4;
+                    cp2y = midY - 35;
+                } else {
+                    // 换行：S曲线
+                    const midX = (x1 + x2) / 2;
+                    cp1x = midX;
+                    cp1y = y1;
+                    cp2x = midX;
+                    cp2y = y2;
+                }
+                
+                const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                const d = `M ${x1} ${y1} C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${x2} ${y2}`;
+                path.setAttribute('d', d);
+                
+                // 根据关卡状态着色
+                const isCompleted = (i + 1) <= completedLevels;
+                const isNext = (i + 1) === completedLevels;
+                if (isCompleted) {
+                    path.setAttribute('stroke', 'rgba(52, 211, 153, 0.4)');
+                    path.setAttribute('stroke-width', '2.5');
+                } else if (isNext) {
+                    path.setAttribute('stroke', 'rgba(167, 139, 250, 0.5)');
+                    path.setAttribute('stroke-width', '2.5');
+                    path.setAttribute('stroke-dasharray', '6 4');
+                } else {
+                    path.setAttribute('stroke', 'rgba(255,255,255,0.12)');
+                    path.setAttribute('stroke-width', '2');
+                }
+                path.setAttribute('fill', 'none');
+                path.setAttribute('marker-end', 'url(#arrowhead)');
+                svg.appendChild(path);
+            }
+            
+            // 画关卡节点
+            for (let i = 0; i < totalLevels; i++) {
+                const pos = positions[i];
+                const levelNum = i + 1;
+                
+                // foreignObject 包裹 HTML 节点
+                const fo = document.createElementNS('http://www.w3.org/2000/svg', 'foreignObject');
+                fo.setAttribute('x', pos.x);
+                fo.setAttribute('y', pos.y);
+                fo.setAttribute('width', nodeSize);
+                fo.setAttribute('height', nodeSize);
+                
+                const div = document.createElement('div');
+                div.className = 'level-node';
+                div.textContent = levelNum;
+                
+                if (levelNum <= completedLevels) {
+                    div.classList.add('completed');
+                    div.title = `第 ${levelNum} 关（已完成）- 点击重玩`;
+                    div.style.cursor = 'pointer';
+                    div.addEventListener('click', () => goToLevel(levelNum));
+                } else if (levelNum === currentLevel) {
+                    div.classList.add('current');
+                    div.title = `第 ${levelNum} 关（当前挑战）`;
+                    div.style.cursor = 'pointer';
+                    div.addEventListener('click', () => goToLevel(levelNum));
+                } else {
+                    div.classList.add('locked');
+                    div.title = `第 ${levelNum} 关（未解锁）`;
+                }
+                
+                fo.appendChild(div);
+                svg.appendChild(fo);
+            }
+        }
+
+        function goToLevel(level) {
+            window.location.href = `/gaming/${level}`;
+        }
+
+        function continueGame() {
+            if (completedLevels >= totalLevels) {
+                alert('恭喜！您已通关所有关卡！');
+                return;
+            }
+            goToLevel(currentLevel);
+        }
+
+        // 键盘快捷操作
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'F1') { e.preventDefault(); continueGame(); }
+        });
+
+        loadProgress();
+    </script>
+</body>
+</html>

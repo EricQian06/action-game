@@ -1,156 +1,570 @@
+
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>动作捕捉游戏 - 登录</title>
     <style>
-        body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #f0f2f5; }
-        .login-container { background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); width: 300px; text-align: center; }
-        input { width: 90%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px; }
-        button { width: 100%; padding: 10px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; margin-top: 5px; }
-        button.secondary { background-color: #6c757d; }
-        button:hover { opacity: 0.9; }
-        .error-msg {color: red; font-weight:bold;margin-bottom: 10px;}
-        
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            overflow: hidden;
+        }
+
+        /* 背景装饰图案 */
+        .background-pattern {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image:
+                radial-gradient(circle at 10% 20%, rgba(255,255,255,0.05) 0%, transparent 20%),
+                radial-gradient(circle at 90% 80%, rgba(255,255,255,0.05) 0%, transparent 20%),
+                radial-gradient(circle at 50% 50%, rgba(255,255,255,0.03) 0%, transparent 50%);
+            z-index: 0;
+        }
+
+        /* 浮动装饰圆 */
+        .floating-circle {
+            position: fixed;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.03);
+            animation: float 20s ease-in-out infinite;
+            z-index: 0;
+        }
+        .floating-circle:nth-child(1) {
+            width: 300px;
+            height: 300px;
+            top: -100px;
+            left: -100px;
+            animation-delay: 0s;
+        }
+        .floating-circle:nth-child(2) {
+            width: 200px;
+            height: 200px;
+            bottom: -50px;
+            right: -50px;
+            animation-delay: -7s;
+        }
+        .floating-circle:nth-child(3) {
+            width: 150px;
+            height: 150px;
+            top: 50%;
+            left: 80%;
+            animation-delay: -14s;
+        }
+
+        @keyframes float {
+            0%, 100% {
+                transform: translate(0, 0) scale(1);
+            }
+            25% {
+                transform: translate(30px, -30px) scale(1.1);
+            }
+            50% {
+                transform: translate(-20px, 20px) scale(0.95);
+            }
+            75% {
+                transform: translate(-30px, -20px) scale(1.05);
+            }
+        }
+
+        /* 主容器 */
+        .login-container {
+            position: relative;
+            z-index: 1;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 3rem 2.5rem;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+            width: 420px;
+            text-align: center;
+            border: 1px solid rgba(255,255,255,0.3);
+            animation: slideUp 0.6s ease-out;
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* 标题 */
+        .game-logo {
+            font-size: 3em;
+            margin-bottom: 5px;
+            animation: bounce 1s ease-in-out infinite;
+        }
+
+        @keyframes bounce {
+            0%, 100% {
+                transform: translateY(0);
+            }
+            50% {
+                transform: translateY(-5px);
+            }
+        }
+
+        h2 {
+            color: #2c3e50;
+            margin-bottom: 5px;
+            font-size: 1.8em;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .subtitle {
+            color: #7f8c8d;
+            font-size: 0.9em;
+            margin-bottom: 25px;
+        }
+
+        /* 输入框样式 */
+        .input-group {
+            position: relative;
+            margin-bottom: 15px;
+        }
+
+        .input-group .icon {
+            position: absolute;
+            left: 15px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 1.2em;
+            color: #aaa;
+            z-index: 1;
+            transition: color 0.3s;
+        }
+
+        input {
+            width: 100%;
+            padding: 14px 15px 14px 45px;
+            margin: 0;
+            border: 2px solid #e0e0e0;
+            border-radius: 12px;
+            font-size: 15px;
+            background: #f8f9fa;
+            transition: all 0.3s ease;
+            outline: none;
+        }
+
+        input:focus {
+            border-color: #667eea;
+            background: #fff;
+            box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
+        }
+
+        input:focus + .icon,
+        .input-group:focus-within .icon {
+            color: #667eea;
+        }
+
+        /* 按钮样式 */
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 5px;
+        }
+
+        button {
+            flex: 1;
+            padding: 14px 20px;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            font-size: 15px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+        }
+
+        button:active {
+            transform: translateY(1px);
+        }
+
+        button[name="action"][value="login"] {
+            background: linear-gradient(45deg, #27ae60, #2ecc71);
+            color: white;
+        }
+
+        button[name="action"][value="register"] {
+            background: linear-gradient(45deg, #2980b9, #3498db);
+            color: white;
+        }
+
+        /* 错误消息 */
+        .error-msg {
+            color: #e74c3c;
+            font-weight: bold;
+            margin-bottom: 10px;
+            font-size: 14px;
+            animation: shake 0.5s ease-in-out;
+        }
+
+        @keyframes shake {
+            0%, 100% {
+                transform: translateX(0);
+            }
+            25% {
+                transform: translateX(-5px);
+            }
+            75% {
+                transform: translateX(5px);
+            }
+        }
+
+        /* 成功消息 */
+        .success-msg {
+            color: #27ae60;
+            font-weight: bold;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+
         /* 弹窗样式 */
-        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; }
-        .modal-content { background: white; padding: 20px; border-radius: 8px; text-align: center; width: 300px; }
-        .modal-buttons { display: flex; gap: 10px; margin-top: 20px; }
-        .btn-register { background-color: #28a745; flex: 1; }
-        .btn-retry { background-color: #007bff; flex: 1; }
-        .close-btn { margin-top: 10px; background: none; border: none; color: #666; cursor: pointer; text-decoration: underline; }
-        
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.6);
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+            backdrop-filter: blur(5px);
+        }
+
+        .modal-content {
+            background: white;
+            padding: 30px;
+            border-radius: 20px;
+            text-align: center;
+            width: 380px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+            animation: slideUp 0.3s ease-out;
+        }
+
+        .modal-content h3 {
+            color: #dc3545;
+            margin-top: 0;
+            font-size: 1.3em;
+            margin-bottom: 15px;
+        }
+
+        .modal-content p {
+            color: #555;
+            margin-bottom: 20px;
+            font-size: 1em;
+        }
+
+        .modal-buttons {
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn-register {
+            flex: 1;
+            padding: 12px;
+            background: linear-gradient(45deg, #28a745, #2ecc71);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+
+        .btn-retry {
+            flex: 1;
+            padding: 12px;
+            background: linear-gradient(45deg, #2980b9, #3498db);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+
+        .btn-register:hover,
+        .btn-retry:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+        }
+
+        .close-btn {
+            margin-top: 15px;
+            background: none;
+            border: none;
+            color: #999;
+            cursor: pointer;
+            text-decoration: underline;
+            font-size: 13px;
+            box-shadow: none;
+        }
+
         /* 单片机控制提示 */
-        .mcu-status { margin-top: 15px; padding: 10px; background: #e7f3ff; border-radius: 4px; font-size: 12px; color: #333; }
-        .mcu-status strong { color: #007bff; }
+        .mcu-status {
+            margin-top: 20px;
+            padding: 12px 15px;
+            background: linear-gradient(135deg, #e8f4fd, #dbeafe);
+            border-radius: 12px;
+            font-size: 12px;
+            color: #444;
+            border: 1px solid rgba(102, 126, 234, 0.2);
+        }
+
+        .mcu-status strong {
+            color: #667eea;
+            font-size: 13px;
+        }
+
+        .mcu-status .key-hint {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: bold;
+            margin: 0 2px;
+        }
+
+        /* 响应式 */
+        @media (max-width: 480px) {
+            .login-container {
+                width: 90%;
+                padding: 2rem 1.5rem;
+            }
+
+            .button-group {
+                flex-direction: column;
+            }
+
+            button {
+                width: 100%;
+            }
+
+            h2 {
+                font-size: 1.5em;
+            }
+        }
     </style>
 </head>
 <body>
+    <!-- 背景浮动装饰 -->
+    <div class="background-pattern"></div>
+    <div class="floating-circle"></div>
+    <div class="floating-circle"></div>
+    <div class="floating-circle"></div>
 
-<div class="login-container">
-    <h2>游戏登录</h2>
-    <form method="POST" action="/login">
-        <input type="text" name="username" id="username" placeholder="用户名 (必须唯一)" required>
-        <input type="password" name="password" id="password" placeholder="密码" required>
-        
-        <!-- 登录按钮 -->
-        <button type="submit" name="action" value="login">直接登录</button>
-        <!-- 注册按钮 -->
-        <button type="submit" name="action" value="register" class="secondary">新建玩家信息</button>
-    </form>
-    
-    <div class="mcu-status">
-        <strong>单片机控制说明：</strong><br>
-        K1 = 登录 | K2 = 注册<br>
-        用户名和密码通过键盘输入，按下 K1 执行登录，按下 K2 执行注册
+    <div class="login-container">
+        <div class="game-logo">🎮</div>
+        <h2>动作捕捉游戏</h2>
+        <p class="subtitle">登录或新建玩家信息开始挑战</p>
+
+        {% if success_msg %}
+        <div class="success-msg">✅ {{ success_msg }}</div>
+        {% endif %}
+
+        <form method="POST" action="/login">
+            <div class="input-group">
+                <span class="icon">👤</span>
+                <input type="text" name="username" id="username" placeholder="用户名 (必须唯一)" required autocomplete="off" value="{{ last_username or '' }}">
+            </div>
+            <div class="input-group">
+                <span class="icon">🔒</span>
+                <input type="password" name="password" id="password" placeholder="密码" required autocomplete="off" value="{{ last_password or '' }}">
+            </div>
+
+            <div class="button-group">
+                <button type="submit" name="action" value="login">
+                    <span>🚀</span> 直接登录
+                </button>
+                <button type="submit" name="action" value="register">
+                    <span>✨</span> 新建玩家
+                </button>
+            </div>
+        </form>
+
+        <div class="mcu-status">
+            <strong>🔌 单片机控制说明</strong><br>
+            <span class="key-hint">K1</span> = 登录 ｜ <span class="key-hint">K2</span> = 注册<br>
+            输入用户名和密码后，按下对应按键即可操作
+        </div>
     </div>
-</div>
 
-{% if error %}
-<div id="errorModal" class="modal" style="display: flex;">
-  <div class="modal-content">
-    <h3 style="color: #dc3545; margin-top: 0;">提示</h3>
-    <p>{{ error }}</p>
-    <div class="modal-buttons">
-        <!-- 引导 a: 切换到注册模式 -->
-        <button class="btn-register" onclick="switchToRegister()">去注册</button>
-        <!-- 引导 b: 再试一次 (关闭弹窗) -->
-        <button class="btn-retry" onclick="closeModal()">再试一次</button>
+    {% if error %}
+    <div id="errorModal" class="modal" style="display: flex;">
+        <div class="modal-content">
+            <h3>⚠️ 提示</h3>
+            <p>{{ error }}</p>
+            <div class="modal-buttons">
+                {% if error_type == 'login_not_found' %}
+                <button class="btn-register" onclick="switchToRegister()">
+                    <span>📝</span> 改为新建
+                </button>
+                <button class="btn-retry" onclick="closeModalKeepInput()">
+                    <span>🔙</span> 返回
+                </button>
+                {% elif error_type == 'register_duplicate' %}
+                <button class="btn-retry" onclick="closeModalClearInput()">
+                    <span>🔙</span> 返回
+                </button>
+                {% else %}
+                <button class="btn-retry" onclick="closeModalFocusEmpty()">
+                    <span>🔙</span> 返回
+                </button>
+                {% endif %}
+            </div>
+        </div>
     </div>
-  </div>
-</div>
-{% endif %}
+    {% endif %}
 
-<script>
-    // 关闭弹窗
-    function closeModal() {
-        document.getElementById('errorModal').style.display = 'none';
-        document.querySelector('input[name="password"]').value = '';
-        document.querySelector('input[name="username"]').focus();
-    }
+    <script>
+        // error_type 和 missing 标记由服务端传入
+        var _errorType = '{{ error_type or "" }}';
+        var _missingUsername = {{ 'true' if missing_username else 'false' }};
+        var _missingPassword = {{ 'true' if missing_password else 'false' }};
 
-    // 切换到注册模式
-    function switchToRegister() {
-        closeModal();
-        const registerBtn = document.querySelector('button[name="action"][value="register"]');
-        if(registerBtn) {
-            document.querySelector('input[name="username"]').focus();
-            alert("已切换至新建模式，请填写信息后点击'新建玩家信息'按钮。");
+        // 返回，保留已有的输入
+        function closeModalKeepInput() {
+            document.getElementById('errorModal').style.display = 'none';
         }
-    }
-    
-    // --- 单片机按键 API 调用 ---
-    // K1 登录：从表单获取用户名和密码并提交
-    window.sendK1 = async function () {
-        const username = document.getElementById('username').value;
-        const password = document.getElementById('password').value;
-        
-        if (!username || !password) {
-            alert('请先输入用户名和密码');
-            return;
+
+        // 返回，清空用户名和密码
+        function closeModalClearInput() {
+            document.getElementById('errorModal').style.display = 'none';
+            document.getElementById('username').value = '';
+            document.getElementById('password').value = '';
+            document.getElementById('username').focus();
         }
-        
-        try {
-            const formData = new FormData();
-            formData.append('username', username);
-            formData.append('password', password);
-            
-            const response = await fetch('/api/k1_login', { 
-                method: 'POST',
-                body: formData
-            });
-            const data = await response.json();
-            if (data.status === 'success') {
-                alert(data.message);
-                window.location.href = data.redirect;
+
+        // 返回，聚焦到未填写的位置
+        function closeModalFocusEmpty() {
+            document.getElementById('errorModal').style.display = 'none';
+            if (_missingUsername) {
+                document.getElementById('username').focus();
+            } else if (_missingPassword) {
+                document.getElementById('password').focus();
             } else {
-                alert(data.message);
+                document.getElementById('username').focus();
             }
-        } catch (e) {
-            console.error('K1 登录失败:', e);
-            alert('登录请求失败');
         }
-    }
-    
-    // K2 注册：从表单获取用户名和密码并提交
-    window.sendK2 = async function () {
-        const username = document.getElementById('username').value;
-        const password = document.getElementById('password').value;
-        
-        if (!username || !password) {
-            alert('请先输入用户名和密码');
-            return;
+
+        // 改为新建：用当前填写的用户名密码直接提交注册
+        function switchToRegister() {
+            document.getElementById('errorModal').style.display = 'none';
+            var form = document.querySelector('form[action="/login"]');
+            var actionInput = document.createElement('input');
+            actionInput.type = 'hidden';
+            actionInput.name = 'action';
+            actionInput.value = 'register';
+            form.appendChild(actionInput);
+            form.submit();
         }
-        
-        try {
-            const formData = new FormData();
-            formData.append('username', username);
-            formData.append('password', password);
-            
-            const response = await fetch('/api/k2_register', { 
-                method: 'POST',
-                body: formData
-            });
-            const data = await response.json();
-            if (data.status === 'success') {
-                alert(data.message);
-                document.getElementById('username').value = '';
-                document.getElementById('password').value = '';
-            } else {
-                alert(data.message);
+
+        // --- 单片机按键 API 调用 ---
+        window.sendK1 = async function () {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+
+            if (!username || !password) {
+                alert('请先输入用户名和密码');
+                return;
             }
-        } catch (e) {
-            console.error('K2 注册失败:', e);
-            alert('注册请求失败');
+
+            try {
+                const formData = new FormData();
+                formData.append('username', username);
+                formData.append('password', password);
+
+                const response = await fetch('/api/k1_login', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+                if (data.status === 'success') {
+                    alert(data.message);
+                    window.location.href = data.redirect;
+                } else {
+                    alert(data.message);
+                }
+            } catch (e) {
+                console.error('K1 登录失败:', e);
+                alert('登录请求失败');
+            }
         }
-    }
-    
-    // --- 键盘监听（方便电脑测试，F1=K1, F2=K2）---
-    document.addEventListener('keydown', async (e) => {
-        if (e.key === 'F1') { e.preventDefault(); sendK1(); return; }
-        if (e.key === 'F2') { e.preventDefault(); sendK2(); return; }
-    });
-</script>
+
+        window.sendK2 = async function () {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+
+            if (!username || !password) {
+                alert('请先输入用户名和密码');
+                return;
+            }
+
+            try {
+                const formData = new FormData();
+                formData.append('username', username);
+                formData.append('password', password);
+
+                const response = await fetch('/api/k2_register', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+                if (data.status === 'success') {
+                    alert(data.message);
+                    document.getElementById('username').value = '';
+                    document.getElementById('password').value = '';
+                } else {
+                    alert(data.message);
+                }
+            } catch (e) {
+                console.error('K2 注册失败:', e);
+                alert('注册请求失败');
+            }
+        }
+
+        // --- 键盘监听（方便电脑测试，F1=K1, F2=K2）---
+        document.addEventListener('keydown', async (e) => {
+            if (e.key === 'F1') { e.preventDefault(); sendK1(); return; }
+            if (e.key === 'F2') { e.preventDefault(); sendK2(); return; }
+        });
+    </script>
 
 </body>
 </html>
