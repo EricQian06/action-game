@@ -124,9 +124,7 @@ server/training_data/
 
 ```bash
 cd server
-python action_matcher.py --prepare \
-    --input_dir ./training_data \
-    --output_dir ./pose_samples
+python action_matcher.py --prepare --input_dir ./training_data --output_dir ./pose_samples
 ```
 
 执行后会在 `server/pose_samples/` 下生成 `squat.csv`、`standing.csv` 等文件。
