@@ -7,9 +7,7 @@ import random
 from werkzeug.utils import secure_filename
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-SAMPLE_DIR = os.path.join(BASE_DIR, 'sample_photos')
 GAMER_DIR = os.path.join(BASE_DIR, 'gamer_photos')
-os.makedirs(SAMPLE_DIR, exist_ok=True)
 os.makedirs(GAMER_DIR, exist_ok=True)
 
 # 添加server目录到Python路径以导入动作识别模块
@@ -18,6 +16,28 @@ SERVER_DIR = os.path.join(PROJECT_DIR, 'server')
 HARDWARE_DIR = os.path.join(PROJECT_DIR, 'hardware')
 sys.path.insert(0, SERVER_DIR)
 sys.path.insert(0, HARDWARE_DIR)
+
+# 使用server/training_data作为动作示例图片来源
+TRAINING_DATA_DIR = os.path.join(SERVER_DIR, 'training_data')
+
+# 获取training_data中实际存在的动作类别（文件夹名）
+def get_training_actions():
+    """获取training_data目录下所有动作类别"""
+    actions = []
+    if os.path.exists(TRAINING_DATA_DIR):
+        for item in sorted(os.listdir(TRAINING_DATA_DIR)):
+            item_path = os.path.join(TRAINING_DATA_DIR, item)
+            if os.path.isdir(item_path):
+                # 检查文件夹中是否有图片文件
+                has_images = any(f.lower().endswith(('.png', '.jpg', '.jpeg'))
+                                for f in os.listdir(item_path))
+                if has_images:
+                    actions.append(item)
+    return actions
+
+# 全局可用动作列表
+AVAILABLE_ACTIONS = get_training_actions()
+print(f"[Info] 检测到training_data动作类别: {AVAILABLE_ACTIONS}")
 
 # 导入键盘模拟功能和动作识别API
 try:
@@ -139,52 +159,69 @@ def index():
 
 @app.route('/api/get_action_image')
 def get_action_image():
-    """返回一张未使用过的随机动作图片"""
-    images = [f for f in os.listdir(SAMPLE_DIR) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
-    if not images:
-        return jsonify({'status': 'error', 'message': 'sample_photos 文件夹为空，请放入参考图片'})
+    """返回一张未使用过的动作示例图片（从training_data中按顺序选取）"""
+    global AVAILABLE_ACTIONS
+
+    # 重新扫描可用动作（以防training_data有更新）
+    AVAILABLE_ACTIONS = get_training_actions()
+
+    if not AVAILABLE_ACTIONS:
+        return jsonify({'status': 'error', 'message': 'training_data 文件夹为空或没有有效动作类别'})
 
     used = session.get('used_images', [])
-    available = [f for f in images if f not in used]
-    
+
+    # 找出未使用过的动作类别
+    available_actions = [a for a in AVAILABLE_ACTIONS if a not in used]
+
     # 如果全部抽完，则清空记录重新开始轮询
-    if not available:
+    if not available_actions:
         session['used_images'] = []
-        available = images[:]
+        available_actions = AVAILABLE_ACTIONS[:]
 
-    chosen = random.choice(available)
-    session['used_images'].append(chosen)
+    # 随机选择一个动作类别
+    chosen_action = random.choice(available_actions)
+    session['used_images'].append(chosen_action)
 
-    # 从文件名推断目标动作类型
-    # 例如: squat_01.jpg -> squat, hands_up_02.png -> hands_up
-    target_action = 'squat'  # 默认动作
-    filename_lower = chosen.lower()
+    # 从该动作类别文件夹中查找01号图片
+    action_dir = os.path.join(TRAINING_DATA_DIR, chosen_action)
+    images = [f for f in os.listdir(action_dir)
+              if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
 
-    if 'squat' in filename_lower:
-        target_action = 'squat'
-    elif 'hands_up' in filename_lower or 'handsup' in filename_lower or 'hand' in filename_lower:
-        target_action = 'hands_up'
-    elif 'stride' in filename_lower or 'step' in filename_lower:
-        target_action = 'stride'
-    elif 'stand' in filename_lower:
-        target_action = 'standing'
+    # 优先选择01号图片
+    chosen_image = None
+    for img in sorted(images):
+        if '_01' in img or '01' in img:
+            chosen_image = img
+            break
+
+    # 如果没有01号图片，选择第一张
+    if not chosen_image and images:
+        chosen_image = sorted(images)[0]
+
+    if not chosen_image:
+        return jsonify({'status': 'error', 'message': f'动作类别 {chosen_action} 中没有图片'})
 
     # 保存当前目标动作到session
-    session['current_action'] = target_action
+    session['current_action'] = chosen_action
 
     # 返回图片访问路径
     return jsonify({
         'status': 'success',
-        'image_url': f'/api/sample_images/{chosen}',
-        'target_action': target_action,
-        'filename': chosen
+        'image_url': f'/api/training_images/{chosen_action}/{chosen_image}',
+        'target_action': chosen_action,
+        'filename': chosen_image,
+        'action_name': chosen_action
     })
 
-#serve_sample_image
-@app.route('/api/sample_images/<filename>')
-def serve_sample_image(filename):
-    """安全地提供 sample_photos 中的图片"""
-    return send_from_directory(SAMPLE_DIR, filename)
+#serve_training_image
+@app.route('/api/training_images/<action>/<filename>')
+def serve_training_image(action, filename):
+    """安全地提供 training_data 中的图片"""
+    action_dir = os.path.join(TRAINING_DATA_DIR, action)
+    # 安全检查：确保请求的动作目录在training_data内
+    if not os.path.realpath(action_dir).startswith(os.path.realpath(TRAINING_DATA_DIR)):
+        return jsonify({'status': 'error', 'message': '非法路径'}), 403
+    return send_from_directory(action_dir, filename)
 
 #save_gamer_photo
 @app.route('/api/save_gamer_photo', methods=['POST'])
@@ -427,28 +464,40 @@ def score_photo():
 @app.route('/api/available_actions', methods=['GET'])
 def get_available_actions():
     """获取所有可用的动作类型"""
-    if action_api is None:
-        return jsonify({
-            'status': 'error',
-            'message': '动作识别API未初始化'
-        }), 500
+    # 从training_data获取实际存在的动作
+    training_actions = get_training_actions()
 
-    actions = action_api.get_available_actions()
     # 动作名称映射
     action_names = {
         'squat': '深蹲',
         'standing': '站立',
         'hands_up': '举手',
         'stride': '跨步',
+        'big': '大字',
+        'love': '爱心',
         'jump': '跳跃',
         'sit': '坐下'
     }
 
-    return jsonify({
-        'status': 'success',
-        'actions': actions,
-        'action_names': {k: action_names.get(k, k) for k in actions}
-    })
+    # 如果动作识别API可用，获取其支持的动作并取交集
+    if action_api is not None:
+        api_actions = action_api.get_available_actions()
+        # 只返回training_data中存在且API支持的动作
+        valid_actions = [a for a in training_actions if a in api_actions]
+        return jsonify({
+            'status': 'success',
+            'actions': valid_actions,
+            'action_names': {k: action_names.get(k, k) for k in valid_actions},
+            'source': 'intersection'
+        })
+    else:
+        # API未初始化时，返回training_data中的动作
+        return jsonify({
+            'status': 'success',
+            'actions': training_actions,
+            'action_names': {k: action_names.get(k, k) for k in training_actions},
+            'source': 'training_data'
+        })
 
 
 #logout
