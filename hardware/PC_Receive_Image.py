@@ -11,7 +11,7 @@ import cv2
 import numpy as np
 
 class ImageReceiver:
-    def __init__(self, port='COM11', baudrate=115200):
+    def __init__(self, port='COM3', baudrate=115200):
         self.port = port
         self.baudrate = baudrate
         self.ser = None
@@ -152,7 +152,7 @@ class ImageReceiver:
 
 def main():
     # 创建接收器实例
-    receiver = ImageReceiver(port='COM11')  # 根据实际串口修改
+    receiver = ImageReceiver(port='COM3')  # 根据实际串口修改
     
     if not receiver.connect():
         return

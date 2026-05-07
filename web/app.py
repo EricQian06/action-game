@@ -59,7 +59,7 @@ except Exception as e:
 # 导入硬件摄像头模块
 try:
     from hardware_camera import HardwareCamera
-    hardware_camera = HardwareCamera(port='COM11')
+    hardware_camera = HardwareCamera(port='COM3')
     print("[Info] 硬件摄像头模块加载成功")
 except Exception as e:
     print(f"[Warning] 硬件摄像头模块加载失败: {e}")
@@ -251,6 +251,16 @@ def save_gamer_photo():
         'target_action': target_action
     })
 
+#photo_count
+@app.route('/api/photo_count', methods=['GET'])
+def photo_count():
+    """返回training_data中的动作类别数量（作为关卡数）"""
+    actions = get_training_actions()
+    return jsonify({
+        'status': 'success',
+        'count': len(actions)
+    })
+
 #capture_hardware
 @app.route('/api/capture_hardware', methods=['POST'])
 def capture_hardware():
@@ -269,13 +279,20 @@ def capture_hardware():
         input_path = os.path.join(SERVER_DIR, 'input.jpg')
         result = hardware_camera.capture(output_path=input_path)
 
-        if result['success']:
+        # 验证文件是否真的保存成功了
+        if result['success'] and os.path.exists(input_path):
             return jsonify({
                 'status': 'success',
                 'message': result['message'],
                 'image_path': '/api/input_image.jpg',
                 'saved_path': result['path']
             })
+        elif result['success']:
+            # 日志说成功了但文件不存在，可能是cv2.imwrite失败
+            return jsonify({
+                'status': 'error',
+                'message': '图像数据处理成功但文件保存失败，可能是图像数据为空或损坏'
+            }), 500
         else:
             return jsonify({
                 'status': 'error',
@@ -376,6 +393,86 @@ def capture_and_score():
             'message': f'拍照评分出错: {str(e)}'
         }), 500
 
+
+#score_input_image
+@app.route('/api/score_input_image', methods=['POST'])
+def score_input_image():
+    """
+    对STM32拍摄的 server/input.jpg 进行动作评分
+
+    请求体: { target_action: "squat" }
+    响应: { status: "success", score: 0.85, match_level: "high", ... }
+    """
+    data = request.get_json() or {}
+    target_action = data.get('target_action', session.get('current_action', 'squat'))
+
+    # 检查input.jpg是否存在
+    input_path = os.path.join(SERVER_DIR, 'input.jpg')
+    if not os.path.exists(input_path):
+        return jsonify({
+            'status': 'error',
+            'message': '照片不存在，请先使用STM32拍照'
+        }), 404
+
+    # 检查动作识别API是否可用
+    if action_api is None:
+        return jsonify({
+            'status': 'error',
+            'message': '动作识别API未初始化，请检查server/pose_samples目录是否存在训练数据'
+        }), 500
+
+    # 检查目标动作是否有效
+    available_actions = action_api.get_available_actions()
+    if target_action not in available_actions:
+        return jsonify({
+            'status': 'error',
+            'message': f'未知的动作类型: {target_action}',
+            'available_actions': available_actions
+        }), 400
+
+    # 执行动作识别
+    try:
+        result = action_api.recognize(input_path, target_action)
+
+        if not result['success']:
+            # 未检测到人体是业务逻辑问题，不应返回 HTTP 500
+            is_no_person = not result.get('landmarks_detected', False)
+            http_code = 200 if is_no_person else 500
+            return jsonify({
+                'status': 'error',
+                'message': result.get('error', '识别失败'),
+                'landmarks_detected': result.get('landmarks_detected', False)
+            }), http_code
+
+        score = result['score']
+
+        # 根据分数判断匹配等级
+        if score >= 0.7:
+            match_level = 'high'
+            match_text = '高度匹配'
+        elif score >= 0.4:
+            match_level = 'medium'
+            match_text = '基本匹配'
+        else:
+            match_level = 'low'
+            match_text = '匹配度低'
+
+        return jsonify({
+            'status': 'success',
+            'score': round(score, 4),
+            'match_level': match_level,
+            'match_text': match_text,
+            'target_action': target_action,
+            'landmarks_detected': result.get('landmarks_detected', False)
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'status': 'error',
+            'message': f'评分过程出错: {str(e)}'
+        }), 500
 
 #score_gamer_photo
 @app.route('/api/score_photo', methods=['POST'])

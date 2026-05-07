@@ -363,7 +363,7 @@ def process_video(detector: SquatDetector, video_path: str, output_path: str = N
 
 def process_image(detector: SquatDetector, image_path: str, output_path: str = None):
     """处理单张图片"""
-    frame = cv2.imread(image_path)
+    frame = cv2.imdecode(np.fromfile(image_path, dtype=np.uint8), cv2.IMREAD_COLOR)
     if frame is None:
         logger.error(f"无法读取图片: {image_path}")
         return

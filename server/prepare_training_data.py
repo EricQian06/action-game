@@ -56,7 +56,7 @@ class PoseExtractor:
         Returns:
             landmarks: shape (33, 3) 的数组，包含 x, y, z 坐标
         """
-        image = cv2.imread(image_path)
+        image = cv2.imdecode(np.fromfile(image_path, dtype=np.uint8), cv2.IMREAD_COLOR)
         if image is None:
             logger.error(f"无法读取图片: {image_path}")
             return None

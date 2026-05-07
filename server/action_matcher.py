@@ -127,7 +127,7 @@ class ActionMatcher:
             self.mp_pose = mp.solutions.pose
             self.pose_detector = self.mp_pose.Pose(
                 static_image_mode=True,
-                model_complexity=2,
+                model_complexity=1,
                 min_detection_confidence=0.5,
                 min_tracking_confidence=0.5
             )
@@ -150,13 +150,24 @@ class ActionMatcher:
             logger.error("MediaPipe未安装")
             return None
 
-        image = cv2.imread(image_path)
+        image = cv2.imdecode(np.fromfile(image_path, dtype=np.uint8), cv2.IMREAD_COLOR)
         if image is None:
             logger.error(f"无法读取图片: {image_path}")
             return None
 
+        h, w = image.shape[:2]
+        logger.info(f"读取图片: {w}x{h}, path={image_path}")
+
         # 转换为RGB
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+        # MediaPipe 对低分辨率图像（如 320x240）检测效果差，先放大
+        min_size = 480
+        if min(h, w) < min_size:
+            scale = min_size / min(h, w)
+            new_w, new_h = int(w * scale), int(h * scale)
+            image_rgb = cv2.resize(image_rgb, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+            logger.info(f"图像放大到: {new_w}x{new_h} 以提升检测率")
 
         # 检测姿态
         results = self.pose_detector.process(image_rgb)

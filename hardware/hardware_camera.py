@@ -6,7 +6,7 @@
 
 使用方式：
     from hardware_camera import HardwareCamera
-    cam = HardwareCamera(port='COM11')
+    cam = HardwareCamera(port='COM3')
     success = cam.capture(output_path='../server/input.jpg')
 """
 
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 class HardwareCamera:
     """硬件摄像头控制类"""
 
-    def __init__(self, port='COM11', baudrate=115200):
+    def __init__(self, port='COM3', baudrate=115200):
         self.port = port
         self.baudrate = baudrate
         self.ser = None
@@ -210,8 +210,39 @@ class HardwareCamera:
             img = self.enhance_image(img)
 
             # 保存图像
-            cv2.imwrite(output_path, img)
-            logger.info(f"图像已保存: {output_path}")
+            write_success = cv2.imwrite(output_path, img)
+            if not write_success:
+                # OpenCV 在 Windows 上不支持中文路径，使用 imencode + 原生写入作为 fallback
+                try:
+                    ext = os.path.splitext(output_path)[1].lower()
+                    if ext in ['.jpg', '.jpeg']:
+                        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 95]
+                        is_ok, buf = cv2.imencode('.jpg', img, encode_param)
+                    elif ext == '.png':
+                        is_ok, buf = cv2.imencode('.png', img)
+                    else:
+                        is_ok, buf = cv2.imencode('.jpg', img)
+
+                    if is_ok:
+                        with open(output_path, 'wb') as f:
+                            f.write(buf.tobytes())
+                        write_success = True
+                        logger.info("使用 imencode fallback 保存图像成功")
+                    else:
+                        logger.error("cv2.imencode 也失败了")
+                except Exception as e:
+                    logger.error(f"imencode fallback 保存出错: {e}")
+
+            if not write_success:
+                logger.error(f"cv2.imwrite 返回失败，图像可能为空或损坏")
+                return {'success': False, 'path': None, 'message': '图像保存失败（cv2.imwrite返回False）'}
+
+            # 验证文件是否真的存在
+            if not os.path.exists(output_path):
+                logger.error(f"文件未生成: {output_path}")
+                return {'success': False, 'path': None, 'message': '图像文件未生成'}
+
+            logger.info(f"图像已保存: {output_path} ({os.path.getsize(output_path)} 字节)")
 
             return {
                 'success': True,
@@ -232,7 +263,7 @@ class HardwareCamera:
 # 全局单例（Flask使用）
 _hardware_camera = None
 
-def get_hardware_camera(port='COM11'):
+def get_hardware_camera(port='COM3'):
     """获取硬件摄像头实例（全局单例）"""
     global _hardware_camera
     if _hardware_camera is None:
@@ -240,7 +271,7 @@ def get_hardware_camera(port='COM11'):
     return _hardware_camera
 
 
-def capture_with_hardware(output_path=None, port='COM11'):
+def capture_with_hardware(output_path=None, port='COM3'):
     """
     便捷函数：使用硬件摄像头拍照
 

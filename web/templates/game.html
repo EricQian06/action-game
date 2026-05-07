@@ -264,22 +264,28 @@
             color: white; 
         }
         
-        #captureBtn { 
-            background: linear-gradient(45deg, #2980b9, #3498db); 
-            color: white; 
-            display: none; 
+        #captureBtn {
+            background: linear-gradient(45deg, #2980b9, #3498db);
+            color: white;
+            display: none;
         }
-        
-        #nextBtn { 
-            background: linear-gradient(45deg, #e67e22, #f39c12); 
-            color: white; 
-            display: none; 
+
+        #submitBtn {
+            background: linear-gradient(45deg, #9b59b6, #8e44ad);
+            color: white;
+            display: none;
         }
-        
-        #exitBtn { 
-            background: linear-gradient(45deg, #e74c3c, #c0392b); 
-            color: white; 
-            display: none; 
+
+        #nextBtn {
+            background: linear-gradient(45deg, #e67e22, #f39c12);
+            color: white;
+            display: none;
+        }
+
+        #exitBtn {
+            background: linear-gradient(45deg, #e74c3c, #c0392b);
+            color: white;
+            display: none;
         }
         
         .status { 
@@ -389,8 +395,12 @@
         
         <div class="game-area">
             <div class="panel">
-                <h3><span class="panel-icon">📷</span> 实时画面</h3>
-                <video id="webcam" autoplay playsinline muted></video>
+                <h3><span class="panel-icon">📷</span> STM32 摄像头画面</h3>
+                <img id="stm32Image" src="" alt="等待拍照..." style="display:none; min-height:300px; background: linear-gradient(45deg, #f8f9fa, #e9ecef);">
+                <p id="cameraHint" style="color:#888; margin-top:10px;">使用 STM32 硬件摄像头</p>
+                <div id="stm32Status" style="margin-top:10px; padding:8px; border-radius:8px; background:rgba(102,126,234,0.1); color:#667eea; font-size:0.9em;">
+                    🔌 STM32 摄像头状态: <span id="stm32StatusText">未连接</span>
+                </div>
             </div>
             <div class="panel">
                 <h3><span class="panel-icon">🎯</span> 目标动作</h3>
@@ -404,7 +414,10 @@
                 <span>🎮</span> 开始游戏
             </button>
             <button id="captureBtn" class="custom-button">
-                <span>📸</span> 拍照提交
+                <span>📸</span> STM32拍照
+            </button>
+            <button id="submitBtn" class="custom-button">
+                <span>✅</span> 提交匹配
             </button>
             <button id="nextBtn" class="custom-button">
                 <span>➡️</span> 下一关
@@ -416,14 +429,17 @@
     </div>
 
     <script>
-        const video = document.getElementById('webcam');
+        const stm32Image = document.getElementById('stm32Image');
         const targetImage = document.getElementById('targetImage');
         const startBtn = document.getElementById('startBtn');
         const captureBtn = document.getElementById('captureBtn');
+        const submitBtn = document.getElementById('submitBtn');
         const nextBtn = document.getElementById('nextBtn');
         const exitBtn = document.getElementById('exitBtn');
         const statusText = document.getElementById('statusText');
         const imageHint = document.getElementById('imageHint');
+        const cameraHint = document.getElementById('cameraHint');
+        const stm32StatusText = document.getElementById('stm32StatusText');
         const currentLevel = document.getElementById('currentLevel');
         const currentScore = document.getElementById('currentScore');
         const completedCount = document.getElementById('completedCount');
@@ -431,15 +447,15 @@
         const progressBar = document.getElementById('progressBar');
         const levelMap = document.getElementById('levelMap');
         const totalLevels = document.getElementById('totalLevels');
-        
-        let stream = null;
+
         let level = 1;
         let score = 0;
         let completedActions = 0;
-        let totalActions = 0;  // 由后端照片数量决定
+        let totalActions = 0;
+        let stm32Connected = false;
+        let currentTargetAction = 'squat';
 
-        // 常量：每关固定得分
-        const SCORE_PER_LEVEL = 60;
+        // 每关得分根据后端相似度动态计算（0~100）
 
         // ===== 加载照片数量 =====
         async function fetchPhotoCount() {
@@ -506,38 +522,37 @@
             renderLevelMap();
         }
         
-        // 1. 启动摄像头 & 获取首个任务
+        // 1. 开始游戏 - 获取首个任务
         startBtn.addEventListener('click', async () => {
-            try {
-                statusText.textContent = "🎮 正在申请摄像头权限...";
-                stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 }, audio: false });
-                video.srcObject = stream;
-                statusText.textContent = "🎥 摄像头已就绪，正在分配第一个动作任务...";
-                startBtn.style.display = 'none';
-                await loadNextAction();
-            } catch (err) {
-                statusText.textContent = "❌ 摄像头启动失败: " + err.message;
-                console.error(err);
-            }
+            statusText.textContent = "🎮 正在加载动作任务...";
+            startBtn.style.display = 'none';
+            await loadNextAction();
         });
  
         // 2. 请求后端获取随机不重复图片
         async function loadNextAction() {
             try {
                 captureBtn.style.display = 'none';
+                submitBtn.style.display = 'none';
                 nextBtn.style.display = 'none';
                 exitBtn.style.display = 'none';
                 imageHint.style.display = 'block';
                 imageHint.textContent = "🔄 加载中...";
-                
+
+                // 重置STM32照片显示
+                stm32Image.style.display = 'none';
+                cameraHint.style.display = 'block';
+                cameraHint.textContent = "使用 STM32 硬件摄像头";
+
                 const res = await fetch('/api/get_action_image');
                 const data = await res.json();
-                
+
                 if (data.status === 'success') {
                     targetImage.src = data.image_url;
                     targetImage.style.display = 'inline-block';
                     imageHint.style.display = 'none';
-                    statusText.textContent = `👉 第 ${level} 关：请模仿屏幕中的动作，完成后点击"拍照提交"`;
+                    currentTargetAction = data.target_action;
+                    statusText.textContent = `👉 第 ${level} 关：请模仿"${data.action_name}"动作，摆好姿势后点击"STM32拍照"`;
                     captureBtn.style.display = 'inline-block';
                     captureBtn.disabled = false;
                 } else {
@@ -548,54 +563,85 @@
                 statusText.textContent = "❌ 网络请求失败: " + err.message;
             }
         }
- 
-        // 3. 拍照并上传
+
+        // 3. 使用 STM32 硬件摄像头拍照
         captureBtn.addEventListener('click', async () => {
-            if (!stream || !video.videoWidth) return;
-            
             captureBtn.disabled = true;
-            statusText.textContent = "📸 正在拍照并上传...";
-            
-            const canvas = document.createElement('canvas');
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            
-            canvas.toBlob(async (blob) => {
-                const formData = new FormData();
-                formData.append('photo', blob, `capture_${Date.now()}.jpg`);
-                
-                try {
-                    const res = await fetch('/api/save_gamer_photo', { method: 'POST', body: formData });
-                    const result = await res.json();
-                    
-                    if (result.status === 'success') {
-                        // 每关固定得 60 分
-                        score += SCORE_PER_LEVEL;
-                        completedActions++;
-                        
-                        updateGameInfo();
-                        updateProgress();
-                        
-                        statusText.textContent = `✅ 第 ${level} 关完成！得分：${score}，请选择下一步操作`;
-                        captureBtn.style.display = 'none';
-                        
-                        if (level < totalActions) {
-                            nextBtn.style.display = 'inline-block';
-                        } else {
-                            statusText.textContent = `🎉 恭喜通关！总得分：${score}，请选择下一步操作`;
-                        }
-                        exitBtn.style.display = 'inline-block';
-                    } else {
-                        statusText.textContent = "❌ 上传失败: " + result.message;
-                        captureBtn.disabled = false;
-                    }
-                } catch (err) {
-                    statusText.textContent = "❌ 上传异常: " + err.message;
+            statusText.textContent = "📸 STM32 正在拍照...";
+            cameraHint.textContent = "等待 STM32 摄像头拍照...";
+
+            try {
+                // 调用后端 STM32 拍照 API
+                const res = await fetch('/api/capture_hardware', { method: 'POST' });
+                const result = await res.json();
+
+                if (result.status === 'success') {
+                    // 显示 STM32 拍到的照片（加时间戳防止缓存）
+                    stm32Image.src = result.image_path + '?t=' + Date.now();
+                    stm32Image.style.display = 'inline-block';
+                    cameraHint.style.display = 'none';
+
+                    statusText.textContent = `📸 拍照成功！请确认照片清晰后点击"提交匹配"进行评分`;
+                    captureBtn.style.display = 'none';
+                    submitBtn.style.display = 'inline-block';
+                    submitBtn.disabled = false;
+                } else {
+                    statusText.textContent = "❌ STM32 拍照失败: " + result.message;
                     captureBtn.disabled = false;
+                    cameraHint.textContent = "拍照失败，请重试";
                 }
-            }, 'image/jpeg', 0.85);
+            } catch (err) {
+                statusText.textContent = "❌ 拍照异常: " + err.message;
+                console.error(err);
+                captureBtn.disabled = false;
+                cameraHint.textContent = "拍照异常，请重试";
+            }
+        });
+
+        // 4. 提交匹配 - 对STM32拍的照片进行评分
+        submitBtn.addEventListener('click', async () => {
+            submitBtn.disabled = true;
+            statusText.textContent = "🔍 正在进行动作匹配评分...";
+
+            try {
+                // 调用评分 API（对 server/input.jpg 评分）
+                const res = await fetch('/api/score_input_image', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target_action: currentTargetAction })
+                });
+                const result = await res.json();
+
+                if (result.status === 'success') {
+                    // 根据后端相似度计算本关得分（0~100）
+                    const levelScore = Math.round(result.score * 100);
+                    score += levelScore;
+                    completedActions++;
+
+                    // 显示评分结果
+                    const scoreInfo = `匹配度: ${(result.score * 100).toFixed(1)}% (${result.match_text})`;
+                    statusText.textContent = `✅ 第 ${level} 关完成！${scoreInfo} 本关得分：${levelScore}，累计：${score}`;
+
+                    updateGameInfo();
+                    updateProgress();
+
+                    submitBtn.style.display = 'none';
+
+                    if (level < totalActions) {
+                        nextBtn.style.display = 'inline-block';
+                    } else {
+                        statusText.textContent = `🎉 恭喜通关！总得分：${score}，请选择下一步操作`;
+                    }
+                    exitBtn.style.display = 'inline-block';
+                } else {
+                    statusText.textContent = "❌ 评分失败: " + result.message;
+                    submitBtn.disabled = false;
+                }
+            } catch (err) {
+                statusText.textContent = "❌ 评分异常: " + err.message;
+                console.error(err);
+                submitBtn.disabled = false;
+            }
         });
  
         // 4. 下一关
@@ -608,15 +654,8 @@
         // 5. 退出游戏
         exitBtn.addEventListener('click', () => {
             if (confirm('确定要退出游戏吗？您的进度将会保存。')) {
-                if (stream) {
-                    stream.getTracks().forEach(track => track.stop());
-                }
                 window.location.href = '/';
             }
-        });
- 
-        window.addEventListener('beforeunload', () => {
-            if (stream) stream.getTracks().forEach(track => track.stop());
         });
 
         // 页面加载时获取照片数量
