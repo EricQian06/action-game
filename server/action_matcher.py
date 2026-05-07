@@ -127,9 +127,9 @@ class ActionMatcher:
             self.mp_pose = mp.solutions.pose
             self.pose_detector = self.mp_pose.Pose(
                 static_image_mode=True,
-                model_complexity=1,
-                min_detection_confidence=0.5,
-                min_tracking_confidence=0.5
+                model_complexity=2,
+                min_detection_confidence=0.3,
+                min_tracking_confidence=0.3
             )
             self.has_mediapipe = True
         except ImportError:
@@ -162,10 +162,15 @@ class ActionMatcher:
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
         # MediaPipe 对低分辨率图像（如 320x240）检测效果差，先放大
-        min_size = 480
+        min_size = 960
         if min(h, w) < min_size:
             scale = min_size / min(h, w)
             new_w, new_h = int(w * scale), int(h * scale)
+            # 避免过大导致内存问题
+            max_dim = 1920
+            if max(new_w, new_h) > max_dim:
+                scale = max_dim / max(w, h)
+                new_w, new_h = int(w * scale), int(h * scale)
             image_rgb = cv2.resize(image_rgb, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
             logger.info(f"图像放大到: {new_w}x{new_h} 以提升检测率")
 
@@ -186,6 +191,32 @@ class ActionMatcher:
     def _compute_distance(self, embedding1: np.ndarray, embedding2: np.ndarray) -> float:
         """计算两个嵌入向量之间的距离"""
         return np.mean(np.abs(embedding1 - embedding2))
+
+    def _estimate_scale(self, action_name: str) -> float:
+        """
+        估计该动作类别的距离尺度参数 scale。
+        取训练样本两两 L1 距离的中位数，防止 scale 过小导致相似度全为 0。
+        """
+        samples = self.action_samples.get(action_name, [])
+        if len(samples) < 2:
+            return 50.0
+
+        # 缓存计算结果
+        cache_key = f"_scale_{action_name}"
+        if hasattr(self, cache_key):
+            return getattr(self, cache_key)
+
+        embeddings = [s['embedding'] for s in samples]
+        distances = []
+        for i in range(len(embeddings)):
+            for j in range(i + 1, len(embeddings)):
+                distances.append(self._compute_distance(embeddings[i], embeddings[j]))
+
+        median_dist = float(np.median(distances)) if distances else 50.0
+        # scale = median_dist / ln(2) ，这样在中位数距离处相似度约为 0.5
+        scale = max(median_dist / 0.693, 20.0)
+        setattr(self, cache_key, scale)
+        return scale
 
     def _compute_similarity_score(
         self,
@@ -235,16 +266,10 @@ class ActionMatcher:
 
         # 将距离转换为相似度分数
         # 使用指数衰减: score = exp(-distance / scale)
-        # scale参数控制衰减速率，可以根据数据调整
-        scale = 5.0  # 距离为5时，相似度约为0.37
+        # scale 根据训练数据分布动态调整：
+        # 取该动作所有样本两两距离的中位数作为参考尺度
+        scale = self._estimate_scale(target_action)
         similarity = np.exp(-mean_distance / scale)
-
-        # 根据阈值调整分数
-        # 如果平均距离超过某个值，分数会显著降低
-        if mean_distance > 20:
-            similarity *= 0.5
-        if mean_distance > 30:
-            similarity *= 0.5
 
         return float(np.clip(similarity, 0.0, 1.0))
 

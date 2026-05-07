@@ -75,7 +75,7 @@ class HardwareCamera:
         # 等待帧头 IMG_START
         start_time = time.time()
         while True:
-            if time.time() - start_time > 10:
+            if time.time() - start_time > 30:
                 logger.error("等待帧头超时")
                 return None
 
